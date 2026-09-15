@@ -45,6 +45,20 @@ export default defineNuxtConfig({
     '@nuxt/icon',
     '@nuxt/devtools',
   ],
+  icon: {
+    serverBundle: {
+      collections: [
+        'ant-design',
+        'ic',
+        'line-md',
+        'majesticons',
+        'material-symbols',
+        'mdi',
+        'ri',
+        'tabler',
+      ],
+    },
+  },
   imports: {
     dirs: [
       'composables/**/*',
