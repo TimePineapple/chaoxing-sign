@@ -44,6 +44,33 @@ pnpm run preview
 
 ## 部署
 
+### 学习通请求代理（可选）
+
+在部署根目录的 .env 中增加一行（端口按实际代理配置填写）：
+
+```dotenv
+CX_PROXY_URL=http://127.0.0.1:7890
+```
+
+支持 HTTP、HTTPS 代理及用户名/密码认证，例如 `http://user:password@proxy.example:8080`。
+用户名、密码中的 @、:、# 等特殊字符需要 URL 编码；代理地址不接受路径、查询参数或片段。
+未配置或留空时直连；配置代理后连接失败会报错，不会自动回退直连。HTTPS 证书仍会正常校验。
+
+代理覆盖学习通登录、资料、课程、签到、云盘和获取监听凭据等 Cx HTTP/HTTPS 请求。
+环信 WebSocket 及其内部请求不使用这项代理设置。
+
+Windows Server 的目录示例为 `C:\apps\chaoxing-sign\.env`，与 .output 文件夹同级。
+从该目录启动：
+
+```powershell
+node --env-file=.env .output/server/index.mjs
+```
+
+首次需要部署包含代理支持的新构建；以后修改代理只需重启，无需重新 build。
+127.0.0.1 指运行后端的服务器自身，不是访问网页的电脑。
+代理需由服务器可达，并支持 HTTPS CONNECT。代理 URL 含密码时不要公开分享。
+代理认证失败、连接失败和学习通返回的 403 拒绝访问分别处理；配置代理不保证该出口能够访问学习通。
+
 ### PM2 + Nginx (推荐)
 
 本项目已经编写好了 `ecosystem.config.js` 文件，具体请根据实际情况修改环境变量，你可以直接使用 PM2 来启动项目。
