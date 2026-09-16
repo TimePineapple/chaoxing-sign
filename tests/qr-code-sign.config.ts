@@ -9,14 +9,23 @@ const vue = fromNuxt('@vitejs/plugin-vue')
 
 export default defineConfig({
   plugins: [vue()],
-  resolve: { alias: { '~': fileURLToPath(new URL('../', import.meta.url)) } },
+  resolve: { alias: {
+    '#auth': fileURLToPath(new URL('./auth.stub.ts', import.meta.url)),
+    '~~': fileURLToPath(new URL('../', import.meta.url)),
+    '~': fileURLToPath(new URL('../', import.meta.url)),
+  } },
   test: {
     environment: 'jsdom',
     include: [
       'tests/qr-code-sign.integration.ts',
       'tests/qr-code-sign.ui.ts',
+      'tests/qr-code-sign-events.ui.ts',
+      'tests/qr-code-sign-account.ui.ts',
       'tests/cx-connectivity.client.test.ts',
       'server/protocol/cx/connectivity.unit.test.ts',
+      'server/utils/qrSignQueue.test.ts',
+      'tests/cx-login-ownership.test.ts',
+      'tests/qr-code-sign-sse.test.ts',
       'utils/qrCodeSign.unit.test.ts',
     ],
   },

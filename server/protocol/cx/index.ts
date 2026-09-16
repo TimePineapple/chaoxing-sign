@@ -1,4 +1,5 @@
 import { qsParse, qsStringify, sleep, timestamp } from '@kuizuo/utils'
+import { setTimeout as delay } from 'node:timers/promises'
 import { mapLimit } from 'async'
 import type { Got } from 'got'
 import { CookieJar } from 'tough-cookie'
@@ -185,7 +186,7 @@ export class Cx {
     this.user.siteName = $('#siteName').attr('title')
   }
 
-  async getCourseList(): Promise<CX.Course[]> {
+  async getCourseList(signal?: AbortSignal): Promise<CX.Course[]> {
     interface CourseBody {
       courseType: string
       courseFolderId: string
@@ -199,6 +200,7 @@ export class Cx {
         headers: { 'content-type': 'application/x-www-form-urlencoded' },
         body: qsStringify(body as any),
         responseType: 'text',
+        signal,
       },
     ).text()
 
@@ -240,12 +242,13 @@ export class Cx {
   /*
     根据 aid 获取活动详情
   */
-  async getActivityDetail(activeId: string | number) {
+  async getActivityDetail(activeId: string | number, signal?: AbortSignal) {
     const { body: data } = await this.http.get<CX.ActivityDetail>('https://mobilelearn.chaoxing.com/newsign/signDetail', {
       searchParams: {
         activePrimaryId: activeId,
         type: 1,
       },
+      signal,
     })
 
     return data
@@ -254,7 +257,7 @@ export class Cx {
   /*
     需要先发送预签到请求 才能够正常记录签到记录
   */
-  async preSign(course: CX.Course, activity: CX.ActivityDetail) {
+  async preSign(course: CX.Course, activity: CX.ActivityDetail, signal?: AbortSignal) {
     const { body: html } = await this.http.get('https://mobilelearn.chaoxing.com/newsign/preSign', {
       searchParams: {
         courseId: course.courseId || '',
@@ -270,9 +273,13 @@ export class Cx {
         ...((activity.ifRefreshEwm) && { rcode: encodeURIComponent(`SIGNIN:aid=${activity.id}&source=15&Code=${activity.code}&enc=${activity.enc}`) }),
       },
       responseType: 'text',
+      signal,
     })
 
-    await sleep(500)
+    if (signal)
+      await delay(500, undefined, { signal })
+    else
+      await sleep(500)
 
     // 两条必要请求!  位置签到必备
     const { body: data } = await this.http.get(
@@ -284,10 +291,11 @@ export class Cx {
           aid: activity.id,
         },
         responseType: 'text',
+        signal,
       },
     )
     const code = data.match(/code='\+'(.*?)'/)?.[1]
-    const { body: data1 } = await this.http.get(
+    await this.http.get(
       'https://mobilelearn.chaoxing.com/pptSign/analysis2',
       {
         searchParams: {
@@ -295,11 +303,13 @@ export class Cx {
           code,
         },
         responseType: 'text',
+        signal,
       },
     )
-    console.log('analysis 结果: ', data1)
-
-    await sleep(500)
+    if (signal)
+      await delay(500, undefined, { signal })
+    else
+      await sleep(500)
 
     const $ = cheerio.load(html)
 
@@ -312,10 +322,11 @@ export class Cx {
   /*
     签到请求
   */
-  async stuSign(query: string) {
+  async stuSign(query: string, signal?: AbortSignal) {
     const { body: data } = await this.http.get('https://mobilelearn.chaoxing.com/pptSign/stuSignajax', {
       searchParams: query,
       responseType: 'text',
+      signal,
     })
 
     if (data === 'success' || data === '您已签到过了')
@@ -445,7 +456,7 @@ export class Cx {
     return this.stuSign(query)
   }
 
-  async signQrCode(activity: CX.ActivityDetail, enc: string) {
+  async signQrCode(activity: CX.ActivityDetail, enc: string, signal?: AbortSignal) {
     const query = qsStringify({
       enc,
       name: this.user.realname,
@@ -459,7 +470,7 @@ export class Cx {
       appType: '15',
     }, '', '', { encodeURIComponent: s => s })
 
-    return this.stuSign(query)
+    return this.stuSign(query, signal)
   }
 
   async getAllActivity(type?: ActivityTypeEnum, status?: ActivityStatusEnum) {

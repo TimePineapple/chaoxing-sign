@@ -2,6 +2,10 @@
 
 基线：`1aacb32`，2026-09-15。下面是现有代码的契约，不是重新设计后的接口，也没有经过真实网络联调。源码路径可在 [JSON 目录](frontend-api.inventory.json) 查到。
 
+**二维码接口更新：**下文第 5 节的旧同步扫码描述及 JSON 目录仍是 2026-09-15 基线快照；当前扫码契约以本段为准。`POST /api/cx/accounts/:uid/sign_by_qrcode` 校验网站会话、账号归属及 URL 与提交字段的一致性，接收 `{uid,activityId,code,enc,url,courseId?}`。成功响应的 `data` 是 `{state,job}`；`state` 为 `accepted`（已入队）或 `busy`（同账号有排队中或执行中的任务）。任务结束立即释放账号占位；再次扫描同活动会创建新任务，不复用旧结果，也不要求确认。`job` 含任务 ID、学习通 uid、活动 ID、状态和脱敏消息，不含完整签到 URL 或 Cookie。POST 不等待最终结果。
+
+扫码弹窗打开时连接 `GET /api/cx/qr-events`（需网站会话），以 SSE 接收 `snapshot` 与 `job` 事件。`snapshot.active` 供中途打开的弹窗恢复排队/处理中状态；新打开的弹窗不展示旧结果。`job` 包含递增 `sequence`，浏览器断线重连可通过 `Last-Event-ID` 补收短暂保留的事件；这段传输记录不参与新提交的判断。服务端按网站账号隔离事件。45 秒超时从任务实际启动计时，反馈“结果未确认”；进程重启会丢失内存任务，此时应核对签到历史。服务端全局任务启动间隔至少 200ms，批量入口不在浏览器延迟提交。
+
 ## 1. 通用规则
 
 - 默认同源相对路径；普通业务 POST 使用 JSON，GET 使用 query。

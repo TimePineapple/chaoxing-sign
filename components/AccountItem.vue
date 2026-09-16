@@ -2,6 +2,8 @@
 import { useDateFormat } from '@vueuse/core'
 import { SignTypeEnum } from '~/constants/cx'
 import { formatQrCodeFeedbackTime, qrCodeRequestError } from '~/utils/qrCodeSign'
+import { connectQrSignEvents } from '~/utils/qrSignEvents.client'
+import type { QrJobView, QrStreamSnapshot, QrSubmitDecision } from '~/utils/qrSignProtocol'
 
 const props = defineProps<{
   uid: string
@@ -18,7 +20,16 @@ const accountStore = useAccountStore()
 
 const loading = ref(false)
 const qrCodeLoading = ref(false)
-const qrCodeResult = ref<{ time: string; status: 'pending' | 'success' | 'error'; message: string } | null>(null)
+interface QrFeedback {
+  time: string
+  status: 'pending' | 'success' | 'error'
+  message: string
+  jobId?: string
+  activityId?: string
+  requestedActivityId?: string
+  retryUrl?: string
+}
+const qrCodeResult = ref<QrFeedback | null>(null)
 const showQrCodeModal = ref(false)
 const showCodeOrGestureModal = ref(false)
 
@@ -27,29 +38,110 @@ const showSignHistory = ref(false)
 
 // 正在执行中的活动
 const doingActivity = ref<CX.ActivityItem | null>(null)
+let closeQrEvents: (() => void) | undefined
+let qrModalGeneration = 0
+
+function applyQrJob(job: QrJobView) {
+  if (job.uid !== props.uid || !showQrCodeModal.value)
+    return
+  const previous = qrCodeResult.value
+  if (previous?.jobId && previous.jobId !== job.id && previous.status === 'pending')
+    return
+  const current = previous?.jobId && previous.jobId !== job.id ? null : previous
+  const differentActivity = Boolean(current?.requestedActivityId && current.requestedActivityId !== job.activityId)
+  const final = job.state === 'success' || job.state === 'error'
+  qrCodeResult.value = {
+    ...current,
+    time: current?.time || formatQrCodeFeedbackTime(),
+    status: job.state === 'success' && !differentActivity ? 'success' : final ? 'error' : 'pending',
+    jobId: job.id,
+    activityId: job.activityId,
+    message: differentActivity
+      ? `先提交的活动 ${job.activityId}：${job.message}。你提交的活动 ${current?.requestedActivityId} 尚未执行，请手动重新提交。`
+      : job.message,
+  }
+}
+
+function handleQrSnapshot(snapshot: QrStreamSnapshot) {
+  const current = qrCodeResult.value
+  if (current?.jobId) {
+    const job = snapshot.active.find(item => item.id === current.jobId)
+    if (job)
+      applyQrJob(job)
+    else if (current.status === 'pending')
+      qrCodeResult.value = { ...current, status: 'error', message: '服务端没有找到原任务，结果未确认；请先核对签到历史，再决定是否重试' }
+    return
+  }
+  const active = snapshot.active.find(item => item.uid === props.uid)
+  if (active)
+    applyQrJob(active)
+}
+
+watch(showQrCodeModal, (show) => {
+  qrModalGeneration += 1
+  closeQrEvents?.()
+  closeQrEvents = undefined
+  qrCodeLoading.value = false
+  if (show) {
+    qrCodeResult.value = null
+    closeQrEvents = connectQrSignEvents(
+      job => applyQrJob(job),
+      handleQrSnapshot,
+      () => {
+        if (qrCodeResult.value?.status === 'pending')
+          qrCodeResult.value.message = '结果连接中断，正在重连；请先核对签到历史，不要重复提交'
+      },
+    )
+  }
+})
+onBeforeUnmount(() => closeQrEvents?.())
+
+function applyQrDecision(decision: QrSubmitDecision, url: string, requestedActivityId: string) {
+  const current = qrCodeResult.value
+  if (current?.jobId === decision.job.id && current.status !== 'pending')
+    return
+  qrCodeResult.value = {
+    time: formatQrCodeFeedbackTime(),
+    status: 'pending',
+    message: decision.state === 'busy' && requestedActivityId !== decision.job.activityId
+      ? `活动 ${decision.job.activityId} 正在处理；你提交的活动 ${requestedActivityId} 未执行。待其结束后请手动重新提交。`
+      : decision.job.message,
+    jobId: decision.job.id,
+    activityId: decision.job.activityId,
+    requestedActivityId,
+    retryUrl: url,
+  }
+}
 
 async function handleQrCodeSignSuccess(result: string) {
   if (qrCodeLoading.value)
     return
 
-  const time = formatQrCodeFeedbackTime()
-  qrCodeResult.value = { time, status: 'pending', message: '请求已发起，等待服务器返回（最多 45 秒）' }
+  const requestedActivityId = new URL(result).searchParams.get('id') || ''
+  const generation = qrModalGeneration
+  qrCodeResult.value = { time: formatQrCodeFeedbackTime(), status: 'pending', message: '正在提交任务', requestedActivityId, retryUrl: result }
   qrCodeLoading.value = true
 
   try {
-    const data = await accountStore.signByQrCode(props.uid, result, doingActivity.value?.course?.courseId)
-    qrCodeResult.value = {
-      time,
-      status: data?.result === '签到成功' ? 'success' : 'error',
-      message: data?.result?.trim() || '签到接口未返回有效结果',
-    }
+    const decision = await accountStore.signByQrCode(props.uid, result, doingActivity.value?.course?.courseId)
+    if (generation === qrModalGeneration)
+      applyQrDecision(decision, result, requestedActivityId)
   }
   catch (error) {
-    qrCodeResult.value = { time, status: 'error', message: qrCodeRequestError(error) }
+    if (generation === qrModalGeneration && !qrCodeResult.value?.jobId)
+      qrCodeResult.value = { time: formatQrCodeFeedbackTime(), status: 'error', message: qrCodeRequestError(error), requestedActivityId, retryUrl: result }
   }
   finally {
-    qrCodeLoading.value = false
+    if (generation === qrModalGeneration)
+      qrCodeLoading.value = false
   }
+}
+
+function retryQrSubmission() {
+  const current = qrCodeResult.value
+  if (!current?.retryUrl || current.status === 'pending')
+    return
+  void handleQrCodeSignSuccess(current.retryUrl)
 }
 
 async function handleCodeOrGestureSignSuccess(result: string) {
@@ -111,6 +203,7 @@ async function handleCodeOrGestureSignSuccess(result: string) {
         <template #result>
           <p v-if="qrCodeResult" role="status">
             <n-text :type="qrCodeResult.status === 'pending' ? 'info' : qrCodeResult.status">{{ qrCodeResult.time }} {{ info.realname }} ({{ uid }}): {{ qrCodeResult.message }}</n-text>
+            <n-button v-if="qrCodeResult.retryUrl && qrCodeResult.status === 'error' && qrCodeResult.activityId && qrCodeResult.requestedActivityId !== qrCodeResult.activityId" size="small" :disabled="qrCodeLoading" @click="retryQrSubmission">重新提交该 URL</n-button>
           </p>
         </template>
       </QrCodeSignModal>

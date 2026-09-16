@@ -322,7 +322,7 @@ function handleUpload() {
     </div>
 
     <span>若有签到链接，可直接在下方输入</span>
-    <n-input-group>
+    <div class="qr-url-actions">
       <n-input class="qr-url-input" v-model:value="text" placeholder="签到链接" clearable :disabled="loading" />
       <n-button
         class="qr-url-submit"
@@ -333,7 +333,7 @@ function handleUpload() {
       >
         签到
       </n-button>
-    </n-input-group>
+    </div>
   </n-modal>
 </template>
 
@@ -355,16 +355,33 @@ function handleUpload() {
   line-height: 1.4;
 }
 
-:deep(.n-input-group > .qr-url-input),
-:deep(.n-input-group > .qr-url-submit) {
+.qr-url-actions {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  margin-top: 10px;
+}
+
+:deep(.qr-url-actions > .qr-url-input) {
+  flex: 1 1 auto;
+  width: auto !important;
+  min-width: 0;
   border-radius: 14px !important;
   margin-left: 0 !important;
 }
 
-:deep(.n-input-group > .qr-url-input .n-input__border),
-:deep(.n-input-group > .qr-url-input .n-input__state-border),
-:deep(.n-input-group > .qr-url-submit .n-button__border),
-:deep(.n-input-group > .qr-url-submit .n-button__state-border) {
+:deep(.qr-url-actions > .qr-url-submit) {
+  flex: 0 0 auto;
+  margin-left: 0 !important;
+  border-radius: 14px !important;
+}
+
+:deep(.qr-url-actions > .qr-url-input .n-input__border),
+:deep(.qr-url-actions > .qr-url-input .n-input__state-border),
+:deep(.qr-url-actions > .qr-url-submit .n-button__border),
+:deep(.qr-url-actions > .qr-url-submit .n-button__state-border) {
   border-radius: 14px !important;
 }
 </style>

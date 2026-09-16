@@ -38,7 +38,7 @@ afterEach(() => {
 it('shows batch failures inside the real modal after a video detection event', async () => {
   for (const [name, value] of Object.entries({
     ref: Vue.ref, computed: Vue.computed, toRef: Vue.toRef, unref: Vue.unref,
-    watch: Vue.watch, onMounted: Vue.onMounted, defineStore,
+    watch: Vue.watch, onMounted: Vue.onMounted, onBeforeUnmount: Vue.onBeforeUnmount, defineStore,
     useLocalStorage: VueUse.useLocalStorage, useNow: VueUse.useNow, useDateFormat: VueUse.useDateFormat,
   }))
     vi.stubGlobal(name, value)
