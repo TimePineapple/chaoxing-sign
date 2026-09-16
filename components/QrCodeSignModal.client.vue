@@ -28,6 +28,7 @@ const props = withDefaults(defineProps<{
   title?: string
   loading?: boolean
   retryFailedAvailable?: boolean
+  waitForSecondUrl?: boolean
 }>(), {
   loading: false,
   retryFailedAvailable: false,
@@ -39,6 +40,9 @@ const emit = defineEmits<{
 }>()
 
 const ms = useMessage()
+const runtimeConfig = typeof useRuntimeConfig === 'function'
+  ? useRuntimeConfig()
+  : { public: {} }
 const text = ref('')
 const showScan = ref(false)
 const cameraReady = ref(false)
@@ -49,6 +53,14 @@ const pendingDetectedLink = ref<string | null>(null)
 const captureContainer = ref<HTMLElement>()
 const submissionGuard = createQrCodeSubmissionGuard()
 let pendingDetectedTimer: ReturnType<typeof setTimeout> | undefined
+
+const waitForSecondUrl = computed(() => {
+  if (props.waitForSecondUrl !== undefined)
+    return props.waitForSecondUrl
+
+  const value = runtimeConfig.public.qrCode?.waitForSecondUrl
+  return value !== false && value !== 'false'
+})
 
 const qrcode = useQRCode(text, {
   errorCorrectionLevel: 'H',
@@ -114,7 +126,7 @@ function submitQrCode(value: string, waitForSecond = false) {
   if (props.loading)
     return
 
-  if (waitForSecond) {
+  if (waitForSecond && waitForSecondUrl.value) {
     const parsed = parseQrCodeSignLink(link)
     if (!parsed) {
       if (link && link !== lastInvalidCode.value) {

@@ -4,6 +4,9 @@ import { createQrSignTraceId, formatQrCodeFeedbackTime, parseQrCodeSignLink, qrC
 
 const accountStore = useAccountStore()
 const logStore = useLogStore()
+const runtimeConfig = typeof useRuntimeConfig === 'function'
+  ? useRuntimeConfig()
+  : { public: {} }
 
 const accounts = toRef(accountStore, 'accounts')
 const selectAccounts = toRef(accountStore, 'selectAccounts')
@@ -33,6 +36,10 @@ const qrCodeResults = ref<{ uid: string; name: string; time: string; traceId: st
 const showQrCodeModal = ref(false)
 const showCodeOrGestureModal = ref(false)
 const retryFailedAvailable = ref(false)
+const autoSelectFailedOnRetry = computed(() => {
+  const value = runtimeConfig.public.qrCode?.autoSelectFailedOnRetry
+  return value !== false && value !== 'false'
+})
 
 // 正在执行中的活动
 const doingActivity = ref<CX.ActivityItem | null>(null)
@@ -60,6 +67,9 @@ function toggleAllChecked() {
 }
 
 function handleRetryFailed() {
+  if (!autoSelectFailedOnRetry.value)
+    return
+
   const failedUids = new Set(qrCodeResults.value.filter(item => item.status === 'error').map(item => item.uid))
   if (failedUids.size === 0) {
     retryFailedAvailable.value = false
@@ -123,7 +133,7 @@ async function handleSuccess(result: string) {
         pendingCount -= 1
         if (pendingCount === 0) {
           qrCodeLoading.value = false
-          retryFailedAvailable.value = qrCodeResults.value.some(item => item.status === 'error')
+          retryFailedAvailable.value = autoSelectFailedOnRetry.value && qrCodeResults.value.some(item => item.status === 'error')
         }
       }
     })()
