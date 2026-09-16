@@ -17,6 +17,7 @@ const ms = useMessage()
 const accountStore = useAccountStore()
 
 const loading = ref(false)
+const qrCodeLoading = ref(false)
 const showQrCodeModal = ref(false)
 const showCodeOrGestureModal = ref(false)
 
@@ -74,7 +75,14 @@ async function handleLogout() {
 }
 
 async function handleQrCodeSignSuccess(result: string) {
-  await accountStore.signByQrCode(props.uid, result, doingActivity.value!.course.courseId!)
+  qrCodeLoading.value = true
+
+  try {
+    await accountStore.signByQrCode(props.uid, result, doingActivity.value?.course?.courseId)
+  }
+  finally {
+    qrCodeLoading.value = false
+  }
 }
 
 async function handleCodeOrGestureSignSuccess(result: string) {
@@ -166,7 +174,7 @@ async function handleUnMonitor() {
           </div>
         </div>
       </template>
-      <QrCodeSignModal v-model:show="showQrCodeModal" :title="doingActivity?.course.name" @success="handleQrCodeSignSuccess" />
+      <QrCodeSignModal v-model:show="showQrCodeModal" :title="doingActivity?.course.name" :loading="qrCodeLoading" @success="handleQrCodeSignSuccess" />
       <CodeOrGestureSignModal v-model:show="showCodeOrGestureModal" :activity="doingActivity!" :loading="loading" @success="handleCodeOrGestureSignSuccess" />
       <SignHistory v-model:show="showSignHistory" :uid="uid" />
       <SettingModal v-if="showSettingModal" v-model:show="showSettingModal" :uid="uid" :setting="setting" />

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { SignTypeEnum } from '~/constants/cx'
+import { createQrSignTraceId, parseQrCodeSignLink, qrCodeRequestError } from '~/utils/qrCodeSign'
 
 const accountStore = useAccountStore()
 const logStore = useLogStore()
@@ -28,6 +29,9 @@ watch(selectAccounts, () => {
 })
 
 const loading = ref(false)
+const qrCodeLoading = ref(false)
+const qrCodeResults = ref<{ uid: string; name: string; traceId: string; status: 'pending' | 'success' | 'error'; message: string }[]>([])
+const qrCodeSummary = ref('')
 const showQrCodeModal = ref(false)
 const showCodeOrGestureModal = ref(false)
 
@@ -85,21 +89,73 @@ async function openQrCodeSignModal() {
   if (toAccounts.length === 0)
     return logStore.log('请先选择账号', { type: 'warning' })
 
+  doingActivity.value = null
+  qrCodeResults.value = []
+  qrCodeSummary.value = ''
   showQrCodeModal.value = true
 }
 
 async function handleSuccess(result: string) {
-  const toAccounts = unref(selectAccounts)
+  if (qrCodeLoading.value)
+    return
 
-  logStore.log(`共 ${toAccounts.length} 个账号准备签到`, { type: 'loading' })
+  const toAccounts = [...unref(selectAccounts)]
+  qrCodeResults.value = []
+  if (toAccounts.length === 0) {
+    qrCodeSummary.value = '没有选中账号，请关闭扫码窗口后选择账号'
+    return logStore.log('请先选择账号', { type: 'warning' })
+  }
 
-  await Promise.allSettled(
-    toAccounts.map((account) => {
-      return accountStore.signByQrCode(account.uid, result)
-    }),
-  )
+  const activity = doingActivity.value
+  const courseId = String(activity?.id) === parseQrCodeSignLink(result)?.activityId
+    ? activity?.course?.courseId
+    : undefined
 
-  logStore.log(`共 ${toAccounts.length} 个账号签到完成`, { type: 'success' })
+  qrCodeLoading.value = true
+  qrCodeSummary.value = `正在提交 ${toAccounts.length} 个账号，请等待各账号结果`
+  qrCodeResults.value = toAccounts.map(account => ({
+    uid: account.uid,
+    name: account.info?.realname || account.uid,
+    traceId: createQrSignTraceId(),
+    status: 'pending',
+    message: '请求已发起，等待服务器返回（最多 45 秒）',
+  }))
+  console.info('[qr-code-sign] 批量扫码开始', { count: toAccounts.length, traceIds: qrCodeResults.value.map(row => row.traceId) })
+  try {
+    await Promise.all(toAccounts.map(async (account, index) => {
+      const row = qrCodeResults.value[index]
+      try {
+        const data = await accountStore.signByQrCode(account.uid, result, courseId, row.traceId)
+        row.status = data?.result === '签到成功' ? 'success' : 'error'
+        row.message = data?.result?.trim() || '签到接口未返回有效结果'
+        console.info(`[qr-code-sign][${row.traceId}] 账号请求结束`, { success: row.status === 'success' })
+      }
+      catch (error) {
+        row.status = 'error'
+        row.message = qrCodeRequestError(error)
+        console.warn(`[qr-code-sign][${row.traceId}] 账号请求失败`)
+      }
+    }))
+
+    const successCount = qrCodeResults.value.filter(item => item.status === 'success').length
+    const failedCount = qrCodeResults.value.length - successCount
+    // Commit visible results before optional toast/log side effects.
+    qrCodeSummary.value = `批量扫码完成：成功 ${successCount} 个，失败 ${failedCount} 个`
+    for (const row of qrCodeResults.value) {
+      if (row.status === 'error')
+        logStore.log(`账号: ${row.name} (${row.uid}) 扫码失败: ${row.message}`, { type: 'error' })
+    }
+    logStore.log(qrCodeSummary.value, {
+      type: failedCount === 0 ? 'success' : successCount === 0 ? 'error' : 'warning',
+    })
+  }
+  catch {
+    // A broken message renderer must not hide completed account results.
+    console.warn('[qr-code-sign] 无法显示签到日志，请查看弹窗内各账号结果')
+  }
+  finally {
+    qrCodeLoading.value = false
+  }
 }
 
 async function handleCodeOrGestureSignSuccess(result: string) {
@@ -137,9 +193,18 @@ async function handleCodeOrGestureSignSuccess(result: string) {
     </div>
     <div class="primary-actions">
       <n-button type="primary" :loading="loading" @click="handleSignAll()"><template #icon><Icon name="material-symbols:swipe-up-outline" /></template>批量签到</n-button>
-      <n-button secondary @click="openQrCodeSignModal()"><template #icon><Icon name="mdi:qrcode-scan" /></template>批量扫码</n-button>
+      <n-button secondary :disabled="qrCodeLoading" @click="openQrCodeSignModal()"><template #icon><Icon name="mdi:qrcode-scan" /></template>批量扫码</n-button>
     </div>
-    <QrCodeSignModal v-model:show="showQrCodeModal" :title="doingActivity?.course.name" @success="handleSuccess" />
+    <QrCodeSignModal v-model:show="showQrCodeModal" :title="doingActivity?.course?.name ?? '批量扫码'" :loading="qrCodeLoading" @success="handleSuccess">
+      <template #result>
+        <p v-if="qrCodeSummary" role="status" class="mb-2">{{ qrCodeSummary }}</p>
+        <ul v-if="qrCodeResults.length" aria-label="各账号扫码结果" class="mb-3">
+          <li v-for="item in qrCodeResults" :key="item.uid">
+            <n-text :type="item.status === 'pending' ? 'info' : item.status">{{ item.name }} ({{ item.uid }}): {{ item.message }}（追踪号 {{ item.traceId }}）</n-text>
+          </li>
+        </ul>
+      </template>
+    </QrCodeSignModal>
     <CodeOrGestureSignModal v-model:show="showCodeOrGestureModal" :activity="doingActivity!" :loading="loading" @success="handleCodeOrGestureSignSuccess" />
   </div>
 </template>

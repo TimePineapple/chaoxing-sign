@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useQRCode } from '@vueuse/integrations/useQRCode'
 import { QrcodeCapture, QrcodeDropZone, QrcodeStream } from 'vue-qrcode-reader'
+import { createQrCodeSubmissionGuard } from '~/utils/qrCodeSign'
 
 export interface DetectedBarcode {
   boundingBox: BoundingBox
@@ -23,9 +24,12 @@ export interface BoundingBox {
   left: number
 }
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   title?: string
-}>()
+  loading?: boolean
+}>(), {
+  loading: false,
+})
 
 const emit = defineEmits<{
   (e: 'success', text: string): void
@@ -33,6 +37,14 @@ const emit = defineEmits<{
 
 const ms = useMessage()
 const text = ref('')
+const showScan = ref(false)
+const cameraReady = ref(false)
+const scanLocked = ref(false)
+const errorMessage = ref('')
+const lastInvalidCode = ref('')
+const captureContainer = ref<HTMLElement>()
+const submissionGuard = createQrCodeSubmissionGuard()
+
 const qrcode = useQRCode(text, {
   errorCorrectionLevel: 'H',
   margin: 2,
@@ -43,89 +55,129 @@ const qrcode = useQRCode(text, {
   },
 })
 
-async function handleQrCode(text: string) {
-  // 将二维码识别结果返回给父组件
-  emit('success', text)
-}
-
-const qrCodeSigning = ref(false)
-
-const showScan = ref(false)
-const errorMessage = ref('')
-
-async function handleScan() {
-  if (errorMessage.value)
-    return ms.error(errorMessage.value)
-
+const scanStatus = computed(() => {
+  if (props.loading)
+    return '正在提交签到...'
+  if (showScan.value && !cameraReady.value)
+    return '正在启动摄像头...'
   if (showScan.value)
+    return '正在实时检测签到二维码'
+  if (scanLocked.value)
+    return '已识别二维码，摄像头已停止'
+  if (errorMessage.value)
+    return errorMessage.value
+  return '摄像头已停止'
+})
+
+function submitQrCode(value: string) {
+  const link = value.trim()
+
+  if (props.loading)
+    return
+
+  const result = submissionGuard.tryLock(link)
+  if (result.status === 'locked')
+    return
+
+  if (result.status === 'invalid') {
+    if (link && link !== lastInvalidCode.value) {
+      lastInvalidCode.value = link
+      ms.error('未识别到有效的签到链接，请重试')
+    }
+    return
+  }
+
+  lastInvalidCode.value = ''
+  scanLocked.value = true
+  showScan.value = false
+  cameraReady.value = false
+  text.value = result.value.link
+  emit('success', result.value.link)
+}
+
+function handleScan() {
+  if (props.loading)
+    return
+
+  if (showScan.value) {
     showScan.value = false
+    cameraReady.value = false
+    return
+  }
 
-  else
-    showScan.value = true
+  text.value = ''
+  errorMessage.value = ''
+  lastInvalidCode.value = ''
+  submissionGuard.reset()
+  scanLocked.value = false
+  cameraReady.value = false
+  showScan.value = true
 }
 
-function onCameraOn(capabilities: any) {
-  // hide loading indicator
-  console.log(capabilities)
+function onCameraOn() {
+  cameraReady.value = true
+  errorMessage.value = ''
 }
 
-async function onError(error: any) {
-  const errorMessages = {
+function onError(error: { name?: string }) {
+  const errorMessages: Record<string, string> = {
     NotAllowedError: '您需要授予相机访问权限！',
     NotFoundError: '此设备上没有摄像头！',
-    NotSupportedError: '需要安全上下文（HTTPS，本地主机）！',
-    NotReadableError: '相机是否已经在使用？',
-    OverconstrainedError: '安装的摄像头不合适！',
-    StreamApiNotSupportedError: '此浏览器不支持 Stream API！',
-    InsecureContextError: '仅在安全上下文中允许访问相机。使用 HTTPS 或 localhost 而不是 HTTP！',
-  } as any
+    NotSupportedError: '需要安全上下文（HTTPS 或 localhost）！',
+    NotReadableError: '摄像头可能正在被其他应用使用！',
+    OverconstrainedError: '未找到符合要求的摄像头！',
+    StreamApiNotSupportedError: '此浏览器不支持摄像头视频流！',
+    StreamLoadTimeoutError: '摄像头启动超时，请重试！',
+    InsecureContextError: '仅能在 HTTPS 或 localhost 中访问摄像头！',
+  }
 
-  errorMessage.value = errorMessages[error.name] ? errorMessages[error.name] : `相机错误（${error.name}）！`
-
-  ms.error(errorMessage.value)
+  errorMessage.value = errorMessages[error.name ?? ''] ?? `相机错误（${error.name ?? '未知错误'}）！`
+  cameraReady.value = false
   showScan.value = false
+  ms.error(errorMessage.value)
 }
 
-async function onDetect(detectedCodes: DetectedBarcode[]) {
-  console.log('detectedCodes', detectedCodes)
+function onDetect(detectedCodes: DetectedBarcode[]) {
+  const rawValue = detectedCodes.find(code => code.rawValue.trim())?.rawValue
 
-  const [firstCode] = detectedCodes
-
-  if (firstCode) {
-    const rawValue = firstCode.rawValue
-
-    ms.success('二维码识别成功,准备签到...')
-    text.value = rawValue
-    showScan.value = false
-
-    qrCodeSigning.value = true
-    await handleQrCode(rawValue).finally(() => {
-      qrCodeSigning.value = false
-    })
-  }
-  else {
-    ms.error('二维码识别失败')
-  }
+  if (rawValue)
+    submitQrCode(rawValue)
 }
 
 function handleOpen() {
+  text.value = ''
+  errorMessage.value = ''
+  lastInvalidCode.value = ''
+  submissionGuard.reset()
+  scanLocked.value = false
+  cameraReady.value = false
   showScan.value = true
 }
 
 function handleClose() {
   showScan.value = false
+  cameraReady.value = false
+  scanLocked.value = false
+  errorMessage.value = ''
+  lastInvalidCode.value = ''
+  submissionGuard.reset()
 }
 
 function handleUpload() {
-  const fileInput = document.querySelector('input[type="file"]')! as HTMLInputElement
+  if (props.loading)
+    return
 
-  fileInput.click()
+  showScan.value = false
+  cameraReady.value = false
+  scanLocked.value = false
+  submissionGuard.reset()
+
+  const fileInput = captureContainer.value?.querySelector<HTMLInputElement>('input[type="file"]')
+  if (fileInput) {
+    fileInput.value = ''
+    fileInput.click()
+  }
 }
-
-watch(text, () => {
-  if (!text.value)
-    qrcode.value = ''
-})
 </script>
 
 <template>
@@ -135,42 +187,78 @@ watch(text, () => {
     size="large"
     :title="title ?? '二维码签到'"
     :bordered="false"
-    :closable="true"
+    :closable="!loading"
     class="mobile-sheet qr-sheet"
     transform-origin="bottom"
     @after-enter="handleOpen"
     @after-leave="handleClose"
   >
     <n-space class="mb-2">
-      <n-button type="info" :disabled="!!errorMessage" @click="handleScan">
-        {{ showScan ? '关闭' : '扫一扫' }}
+      <n-button type="info" :disabled="loading" @click="handleScan">
+        {{ showScan ? '关闭摄像头' : '重新扫描' }}
       </n-button>
-      <n-button v-if="qrcode" type="error" @click="text = ''">
+      <n-button :disabled="loading" @click="handleUpload">
+        选择图片
+      </n-button>
+      <n-button v-if="text" type="error" :disabled="loading" @click="text = ''">
         清除
       </n-button>
     </n-space>
-    <div class="w-full aspect-1 border-1 transition hover:(border-1 border-green border-dotted)">
-      <n-image v-if="qrcode && !showScan" :src="qrcode" />
 
-      <template v-else>
-        <QrcodeStream v-if="showScan && !qrcode" :constraints="{ facingMode: 'environment' }" class="bg-black/20" @camera-on="onCameraOn" @error="onError" @detect="onDetect" />
-        <QrcodeDropZone v-else class="flex flex-col justify-center items-center h-full w-full cursor-pointer " @detect="onDetect" @click="handleUpload()">
-          <div style="padding-top: 16px;margin-bottom: 12px">
-            <Icon name="material-symbols:unarchive-outline-sharp" size="48" />
-          </div>
-          <n-text>
-            点击或者拖动文件到该区域来上传
-          </n-text>
-        </QrcodeDropZone>
-        <QrcodeCapture :multiple="false" class="hidden" capture="environment" @detect="onDetect" />
-      </template>
+    <n-text class="scan-status" :type="errorMessage ? 'error' : 'info'">
+      {{ scanStatus }}
+    </n-text>
+    <slot name="result" />
+
+    <div class="w-full aspect-1 border-1 transition hover:(border-1 border-green border-dotted)">
+      <QrcodeStream
+        v-if="showScan"
+        :constraints="{ facingMode: { ideal: 'environment' } }"
+        class="bg-black/20"
+        @camera-on="onCameraOn"
+        @error="onError"
+        @detect="onDetect"
+      />
+
+      <n-image v-else-if="qrcode && scanLocked" :src="qrcode" />
+
+      <QrcodeDropZone
+        v-else
+        class="flex flex-col justify-center items-center h-full w-full cursor-pointer"
+        @detect="onDetect"
+        @click="handleUpload"
+      >
+        <div style="padding-top: 16px; margin-bottom: 12px">
+          <Icon name="material-symbols:unarchive-outline-sharp" size="48" />
+        </div>
+        <n-text>
+          点击选择图片，或将图片拖到此处识别
+        </n-text>
+      </QrcodeDropZone>
+
+      <div ref="captureContainer" class="hidden">
+        <QrcodeCapture :capture="null" :multiple="false" @detect="onDetect" />
+      </div>
     </div>
+
     <span>若有签到链接，可直接在下方输入</span>
     <n-input-group>
-      <n-input v-model:value="text" placeholder="签到链接" clearable />
-      <n-button type="primary" :loading="qrCodeSigning" @click="handleQrCode(text)">
+      <n-input v-model:value="text" placeholder="签到链接" clearable :disabled="loading" />
+      <n-button
+        type="primary"
+        :loading="loading"
+        :disabled="!text.trim() || scanLocked"
+        @click="submitQrCode(text)"
+      >
         签到
       </n-button>
     </n-input-group>
   </n-modal>
 </template>
+
+<style scoped>
+.scan-status {
+  display: block;
+  margin-bottom: 10px;
+}
+</style>

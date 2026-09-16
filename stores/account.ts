@@ -3,6 +3,7 @@ import { createDiscreteApi } from 'naive-ui'
 import { signTypeMap } from '~/constants/cx'
 import type { Body as LoginForm } from '~/server/api/cx/login.post'
 import type { Account, Activity, Course, Setting } from '~/types/account'
+import { createQrSignTraceId, parseQrCodeSignLink } from '~/utils/qrCodeSign'
 
 export const useAccountStore = defineStore('account', () => {
   const accounts = ref<Account[]>([])
@@ -173,23 +174,59 @@ export const useAccountStore = defineStore('account', () => {
   /*
     二维码签到
   */
-  async function signByQrCode(uid: string, link: string, courseId: string) {
+  async function signByQrCode(uid: string, link: string, courseId?: string, traceId = createQrSignTraceId()) {
     // 提取 activityId 和 enc
     // https://mobilelearn.chaoxing.com/widget/sign/e?id=8000063022220&c=529773&enc=A5BC081D895B41540E129437F6B4180F&DB_STRATEGY=PRIMARY_KEY&STRATEGY_PARA=id
 
-    const activityId = link.match(/id=(\w+)\&/)?.[1]
-    const code = link.match(/&c=(\w+)\&/)?.[1]
-    const enc = link.match(/enc=(\w+)/)?.[1]
+    const parsed = parseQrCodeSignLink(link)
+    if (!parsed)
+      throw new Error('无效的签到链接')
 
-    const { data } = await request(`/api/cx/accounts/${uid}/sign_by_qrcode`, {
-      method: 'POST',
-      body: { uid, courseId, activityId, enc, code, url: link },
-    })
+    const { activityId, code, enc } = parsed
+    const startedAt = Date.now()
+    console.info(`[qr-code-sign][${traceId}] 客户端发送请求`)
+    let response
+    try {
+      response = await request(`/api/cx/accounts/${uid}/sign_by_qrcode`, {
+        method: 'POST',
+        timeout: 45_000,
+        retry: 0,
+        headers: { 'x-qr-sign-trace-id': traceId },
+        body: { uid, courseId, activityId, enc, code, url: link },
+      })
+      console.info(`[qr-code-sign][${traceId}] 客户端收到响应`, { code: response?.code, elapsedMs: Date.now() - startedAt })
+    }
+    catch (error) {
+      const failure = error as { statusCode?: number; status?: number; cause?: { name?: string } }
+      console.error(`[qr-code-sign][${traceId}] 客户端请求异常`, {
+        status: failure?.statusCode ?? failure?.status,
+        cause: failure?.cause?.name,
+        elapsedMs: Date.now() - startedAt,
+      })
+      throw error
+    }
 
-    const { activity } = data!
+    if (response?.code !== 200) {
+      console.warn(`[qr-code-sign][${traceId}] 服务端返回业务错误`, { code: response?.code })
+      throw new Error(response?.message || '签到接口返回错误或空响应')
+    }
+
+    const { data } = response
+    if (!data?.activity || typeof data.result !== 'string' || !data.result.trim()) {
+      console.warn(`[qr-code-sign][${traceId}] 签到结果为空`)
+      throw new Error('签到接口未返回有效结果，请检查服务端日志')
+    }
+    console.info(`[qr-code-sign][${traceId}] 客户端获得签到结果`, { success: data.result === '签到成功' })
+
+    const { activity } = data
     const signType = signTypeMap[activity.otherId] ?? '未知'
     const activityName = activity.name || signType
-    log(`活动: ${activityName} [${signType}]结果: ${data?.result || ms}`, { type: data?.result === '签到成功' ? 'success' : 'error' })
+    try {
+      log(`账号: ${uid} 活动: ${activityName} [${signType}]结果: ${data.result}`, { type: data.result === '签到成功' ? 'success' : 'error' })
+    }
+    catch {
+      console.warn('[qr-code-sign] 无法显示签到日志，已保留接口返回结果')
+    }
 
     return data
   }
