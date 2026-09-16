@@ -1,6 +1,7 @@
 import { omit } from 'lodash-es'
 import { getServerSession } from '#auth'
-import { CXMap, Cx } from '~~/server/protocol/cx'
+import { CXMap, Cx, CxLoginError } from '~~/server/protocol/cx'
+import { CxProxyError } from '~~/server/protocol/cx/proxy'
 import { defaultSetting } from '~/constants/setting'
 
 export interface Body extends Pick<CX.User, 'username' | 'password'> { }
@@ -20,8 +21,17 @@ export default defineEventHandler(async (event) => {
   if (count >= 6)
     throw createError({ statusMessage: '该账户已登录账号达到最大限制' })
 
-  const cx = new Cx(body)
-  const result = await cx.login()
+  let cx: Cx
+  let result: string | null
+  try {
+    cx = new Cx(body)
+    result = await cx.login()
+  }
+  catch (error) {
+    if (error instanceof CxLoginError || error instanceof CxProxyError)
+      throw createError({ statusCode: 502, message: error.message })
+    throw error
+  }
 
   if (!cx.user.logged)
     return new ResOp(201, null, result!)

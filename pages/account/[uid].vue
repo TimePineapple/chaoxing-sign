@@ -12,7 +12,7 @@ function handleBack() {
 </script>
 
 <template>
-  <n-card class="max-w-6xl mx-auto">
+  <n-card class="account-detail-card">
     <n-page-header @back="handleBack">
       <template #avatar>
         <n-avatar

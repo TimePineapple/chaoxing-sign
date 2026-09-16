@@ -39,14 +39,16 @@ async function handleSuccess() {
 <template>
   <div>
     <div v-if="status === 'authenticated'" class="flex">
-      <n-dropdown trigger="hover" :options="options" @select="handleSelect">
-        <n-avatar size="small" round :src="user?.image!">
+      <n-dropdown trigger="click" :options="options" @select="handleSelect">
+        <button class="icon-button" type="button" aria-label="用户菜单">
+          <n-avatar size="small" round :src="user?.image!">
           <span v-if="!user?.image">{{ user?.name }}</span>
-        </n-avatar>
+          </n-avatar>
+        </button>
       </n-dropdown>
     </div>
     <div v-else>
-      <n-button size="small" type="primary" @click="showModal = true">
+      <n-button type="primary" @click="showModal = true">
         登录
       </n-button>
       <ClientOnly>
@@ -57,8 +59,8 @@ async function handleSuccess() {
           size="large"
           :bordered="false"
           :closable="false"
-          :style="{ 'max-width': '350px' }"
-          transform-origin="center"
+          class="mobile-sheet login-sheet"
+          transform-origin="bottom"
         >
           <LoginCard @success="handleSuccess" />
         </n-modal>

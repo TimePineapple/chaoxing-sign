@@ -1,7 +1,7 @@
 <template>
   <div class="app-layout">
     <AppHeader />
-    <main class="container mx-auto py-4 px-4 lg:px-10 text-center">
+    <main class="mobile-main">
       <slot />
     </main>
     <AppPwaInstall />

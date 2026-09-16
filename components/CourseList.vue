@@ -51,59 +51,33 @@ async function signByActivity(course: Course, activity: Activity) {
 </script>
 
 <template>
-  <n-divider dashed>
-    <span class="space-x-2">
-      <span v-if="account?.courses?.length! > 0"> 共 {{ account?.courses?.length }} 门课程</span>
-      <span v-else>课程列表</span>
-      <n-tooltip trigger="hover">
-        <template #trigger>
-          <Icon
-            name="material-symbols:cloud-sync-outline-rounded"
-            class="cursor-pointer"
-            :class="{ 'animate-spin': isSyncLoading }"
-            @click="syncCourse()"
-          />
-        </template>
-        同步课程
-      </n-tooltip>
-    </span>
-  </n-divider>
-  <n-card v-if="courses?.length > 0">
-    <n-grid :x-gap="12" :y-gap="8" cols="2 s:3 m:4 l:4 xl:4 2xl:6" responsive="screen">
+  <div class="section-heading course-heading">
+    <h2>课程 <span class="count">{{ account?.courses?.length || 0 }}</span></h2>
+    <n-button secondary :loading="isSyncLoading" @click="syncCourse()"><template #icon><Icon name="material-symbols:cloud-sync-outline-rounded" /></template>同步课程</n-button>
+  </div>
+  <div v-if="courses?.length > 0" class="course-stack">
+    <n-grid :cols="1" :y-gap="12">
       <n-grid-item v-for="course in courses" :key="course.courseId">
-        <n-card size="small" hoverable>
+        <n-card class="course-card">
           <template #header>
-            <h2 class="text-base truncate">
+            <h2 class="course-name">
               {{ course.name }}
             </h2>
           </template>
           <template #cover>
-            <img :src="course.image">
+            <img :src="course.image" :alt="course.name" class="course-cover">
           </template>
           <template #action>
-            <n-space :size="20">
-              <n-tooltip trigger="hover">
-                <template #trigger>
-                  <Icon v-if="course.isLoadActivity" name="line-md:loading-loop" />
-                  <Icon v-else name="material-symbols:grid-view-outline-rounded" @click="lookActivities(course)" />
-                </template>
-                活动列表
-              </n-tooltip>
-
-              <n-tooltip trigger="hover">
-                <template #trigger>
-                  <Icon v-if="course.isSigning" name="line-md:loading-loop" />
-                  <Icon v-else name="material-symbols:swipe-up-outline" class="hover:animate-bounce" @click="signByCourse(course)" />
-                </template>
-                一键签到
-              </n-tooltip>
-            </n-space>
+            <div class="primary-actions">
+              <n-button secondary :loading="course.isLoadActivity" @click="lookActivities(course)"><template #icon><Icon name="material-symbols:grid-view-outline-rounded" /></template>活动列表</n-button>
+              <n-button type="primary" :loading="course.isSigning" @click="signByCourse(course)"><template #icon><Icon name="material-symbols:swipe-up-outline" /></template>一键签到</n-button>
+            </div>
           </template>
         </n-card>
       </n-grid-item>
     </n-grid>
-  </n-card>
-  <div v-else>
+  </div>
+  <div v-else class="empty-card">
     <n-empty description="暂无课程" size="small" />
   </div>
   <n-modal
@@ -113,8 +87,8 @@ async function signByActivity(course: Course, activity: Activity) {
     size="medium"
     :bordered="false"
     :closable="true"
-    :style="{ 'max-width': '500px' }"
-    transform-origin="center"
+    class="mobile-sheet activity-sheet"
+    transform-origin="bottom"
   >
     <div v-if="activities.length > 0">
       <n-list hoverable clickable>
@@ -124,11 +98,11 @@ async function signByActivity(course: Course, activity: Activity) {
               <n-avatar :size="50" :src="activity.logo" style="--n-color: rgb(255 255 255 / 0%);" />
             </template>
             <template #header>
-              <div inline-flex items-center font-sans>
+              <div class="activity-title">
                 <h2 text-lg>
                   {{ activity.nameOne }}
                 </h2>
-                <p ml-2 text-sm text-gray>
+                <p class="muted">
                   {{ activity.nameFour }}
                 </p>
               </div>

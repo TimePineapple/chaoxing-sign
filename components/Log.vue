@@ -17,7 +17,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <n-card class="my-4 text-left" content-style="padding: 0 0.5rem;" header-style="padding: 0.5rem 0.5rem;">
+  <n-card class="log-card">
     <template #header>
       <div class="inline-flex justify-center items-center gap-1">
         <Icon name="material-symbols:docs-outline" />
@@ -28,12 +28,12 @@ onMounted(() => {
       <div class="inline-flex justify-center items-center gap-2">
         <n-popconfirm @positive-click="logStore.cleanLog()">
           <template #trigger>
-            <Icon name="material-symbols:cleaning-services" class="cursor-pointer transition hover:text-primary" />
+            <button class="icon-button" type="button" aria-label="清空操作日志"><Icon name="material-symbols:cleaning-services" /></button>
           </template>
           确认清除所有日志?
         </n-popconfirm>
 
-        <Icon :name="logStore.showLog ? 'tabler:layout-bottombar-collapse' : 'tabler:layout-navbar-collapse'" class="cursor-pointer transition hover:text-primary" @click="logStore.showLog = !logStore.showLog" />
+        <button class="icon-button" type="button" :aria-label="logStore.showLog ? '收起操作日志' : '展开操作日志'" :aria-expanded="logStore.showLog" @click="logStore.showLog = !logStore.showLog"><Icon :name="logStore.showLog ? 'tabler:layout-bottombar-collapse' : 'tabler:layout-navbar-collapse'" /></button>
       </div>
     </template>
     <n-collapse-transition :show="logStore.showLog">

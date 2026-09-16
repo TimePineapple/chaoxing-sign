@@ -136,8 +136,8 @@ watch(text, () => {
     :title="title ?? '二维码签到'"
     :bordered="false"
     :closable="true"
-    :style="{ 'max-width': '360px' }"
-    transform-origin="center"
+    class="mobile-sheet qr-sheet"
+    transform-origin="bottom"
     @after-enter="handleOpen"
     @after-leave="handleClose"
   >

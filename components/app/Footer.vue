@@ -6,22 +6,22 @@ const themeVars = useThemeVars()
 </script>
 
 <template>
-  <footer class="border-t h-[--app-footer-height]" :style="{ borderColor: themeVars.borderColor }">
-    <div class="container mx-auto h-full px-4 py-2">
-      <div class="flex justify-between items-center h-full gap-2 py-4 md:gap-x-4 md:text-base">
-        <div class="inline-flex gap-1 md:gap-4">
+  <footer class="mobile-footer" :style="{ borderColor: themeVars.borderColor }">
+    <div class="footer-content">
+      <div class="footer-details">
+        <div class="footer-links">
           <NuxtLink :to="pkg.author.url" target="_blank" class="flex items-center gap-1 text-xs">
             <i class="i-ri-user-star-line" />
             <p class="font-semibold">
               作者: {{ pkg.author.name }}
             </p>
           </NuxtLink>
-          <NuxtLink target="_blank" class="flex items-center gap-1 text-xs">
+          <span class="flex items-center gap-1 text-xs">
             <i class="i-ri-file-code-line" />
             <p class="font-semibold">
               版本: {{ pkg.version }}
             </p>
-          </NuxtLink>
+          </span>
           <div class="flex items-center gap-1 text-xs">
             <i class="i-ri-building-2-line " />
             <span class="font-semibold">
@@ -32,9 +32,8 @@ const themeVars = useThemeVars()
             </NuxtLink>
           </div>
         </div>
-        <div class="flex-auto" />
         <div class="flex items-center gap-3">
-          <NuxtLink class="i-ri-github-line icon-btn" :to="pkg.repository.url" target="_blank" />
+          <NuxtLink class="action-link" :to="pkg.repository.url" target="_blank" aria-label="项目 GitHub"><Icon name="ri:github-line" />GitHub</NuxtLink>
         </div>
       </div>
     </div>

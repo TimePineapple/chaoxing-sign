@@ -43,12 +43,12 @@ watch(active, (value) => {
 </script>
 
 <template>
-  <n-drawer v-model:show="active" :default-width="502" resizable placement="right">
+  <n-drawer v-model:show="active" height="85dvh" placement="bottom" class="history-sheet">
     <n-drawer-content title="签到记录" closable :native-scrollbar="false">
       <n-spin :show="pending">
         <n-list v-if="historyList?.length! > 0" hoverable clickable>
           <n-list-item v-for="item in historyList" :key="item.id">
-            <n-thing :title-extra="useDateFormat(item.time, 'YYYY-MM-DD hh-mm-ss').value" content-style="margin-top: 10px;">
+            <n-thing content-style="margin-top: 10px;">
               <template #header>
                 <n-space>
                   <span>{{ item.activityName }}</span>
@@ -60,7 +60,7 @@ watch(active, (value) => {
                   </n-tag>
                 </n-space>
               </template>
-              <template #description />
+              <template #description>{{ useDateFormat(item.time, 'YYYY-MM-DD hh-mm-ss').value }}</template>
               {{ item.result }}
             </n-thing>
           </n-list-item>

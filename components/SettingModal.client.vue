@@ -52,22 +52,19 @@ watch(show, (value) => {
     preset="card"
     :auto-focus="false"
     :closable="false"
-    style="max-width: 300px"
+    class="mobile-sheet setting-sheet"
   >
     <template #header-extra>
-      <Icon name="ant-design:close-circle-outlined" class="cursor-pointer transition hover:text-red" @click="show = false" />
+      <button class="icon-button" type="button" aria-label="关闭设置" @click="show = false"><Icon name="ant-design:close-circle-outlined" /></button>
     </template>
     <n-spin :show="saving">
       <n-form
         :model="form"
-        label-placement="left"
+        label-placement="top"
         label-width="auto"
         require-mark-placement="right-hanging"
         :show-feedback="false"
-        size="small"
-        :style="{
-          maxWidth: '300px',
-        }"
+        size="medium"
       >
         <n-form-item label="签到延迟" path="delay">
           <n-input-number
@@ -89,7 +86,7 @@ watch(show, (value) => {
                 位置
               </template>
               <template #suffix>
-                <n-tooltip trigger="hover">
+                <n-tooltip trigger="click">
                   <template #trigger>
                     <a class="flex" href="javascript:void(0);">
                       <Icon name="material-symbols:info-outline-rounded" />
@@ -107,7 +104,7 @@ watch(show, (value) => {
                 经度
               </template>
               <template #suffix>
-                <n-tooltip trigger="hover">
+                <n-tooltip trigger="click">
                   <template #trigger>
                     <a class="flex" href="https://api.map.baidu.com/lbsapi/getpoint/index.html" target="_blank">
                       <Icon name="material-symbols:add-location-outline-rounded" />
@@ -125,7 +122,7 @@ watch(show, (value) => {
                 纬度
               </template>
               <template #suffix>
-                <n-tooltip trigger="hover">
+                <n-tooltip trigger="click">
                   <template #trigger>
                     <a class="flex" href="https://api.map.baidu.com/lbsapi/getpoint/index.html" target="_blank">
                       <Icon name="material-symbols:add-location-outline-rounded" />
@@ -156,7 +153,7 @@ watch(show, (value) => {
             <n-button @click="handleReset">
               重置
             </n-button>
-            <n-button @click="handleSave">
+            <n-button type="primary" :loading="saving" @click="handleSave">
               保存
             </n-button>
           </n-space>

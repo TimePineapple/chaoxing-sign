@@ -130,28 +130,18 @@ async function handleCodeOrGestureSignSuccess(result: string) {
 </script>
 
 <template>
-  <n-card class="my-4 text-left">
-    <n-checkbox v-model:checked="isAllChecked" :indeterminate="indeterminate" size="large" label="账号全选" @update:checked="handleCheckedChange" />
-
-    <n-space :size="20" class="ml-4 !inline-flex">
-      <n-tooltip trigger="hover">
-        <template #trigger>
-          <Icon v-if="loading" name="line-md:loading-loop" />
-          <Icon v-else name="material-symbols:swipe-up-outline" @click="handleSignAll()" />
-        </template>
-        一键全部签到
-      </n-tooltip>
-
-      <n-tooltip trigger="hover">
-        <template #trigger>
-          <Icon name="mdi:qrcode-scan" class="hover:scale-125" @click="openQrCodeSignModal()" />
-        </template>
-        全部二维码扫码签到
-      </n-tooltip>
-    </n-space>
+  <div class="batch-bar" role="region" aria-label="批量签到操作">
+    <div class="batch-selection">
+      <n-checkbox v-model:checked="isAllChecked" :indeterminate="indeterminate" size="large" label="全选" @update:checked="handleCheckedChange" />
+      <span>已选 <strong>{{ selectAccounts.length }}</strong> 个账号</span>
+    </div>
+    <div class="primary-actions">
+      <n-button type="primary" :loading="loading" @click="handleSignAll()"><template #icon><Icon name="material-symbols:swipe-up-outline" /></template>批量签到</n-button>
+      <n-button secondary @click="openQrCodeSignModal()"><template #icon><Icon name="mdi:qrcode-scan" /></template>批量扫码</n-button>
+    </div>
     <QrCodeSignModal v-model:show="showQrCodeModal" :title="doingActivity?.course.name" @success="handleSuccess" />
     <CodeOrGestureSignModal v-model:show="showCodeOrGestureModal" :activity="doingActivity!" :loading="loading" @success="handleCodeOrGestureSignSuccess" />
-  </n-card>
+  </div>
 </template>
 
 <style scoped>

@@ -1,13 +1,13 @@
 <template>
-  <div>
+  <div class="home-page">
     <Suspense>
       <template #fallback>
         <div class="op50 italic">
           <span class="animate-pulse">Loading...</span>
         </div>
       </template>
-      <div class="flex justify-center">
-        <div class="w-1024px">
+      <div>
+        <div class="home-content">
           <Hero />
           <AccountList />
           <Operation />

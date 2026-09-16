@@ -33,6 +33,8 @@
   "dependencies": {
     "@prisma/client": "^5.22.0",
     "easemob-websdk": "^4.10.0",
+    "http-proxy-agent": "7.0.2",
+    "https-proxy-agent": "7.0.5",
     "next-auth": "~4.21.1",
     "tough-cookie": "^5.0.0"
   },

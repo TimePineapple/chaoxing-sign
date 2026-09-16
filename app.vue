@@ -21,6 +21,10 @@ const themeOverrides = computed(() => {
       primaryColorHover: lightenStr,
       primaryColorPressed: lightenStr,
       primaryColorSuppl: theme,
+      borderRadius: '14px',
+      fontSize: '16px',
+      heightMedium: '44px',
+      heightLarge: '48px',
     },
   }
 })
@@ -53,6 +57,7 @@ useHead({
 
 <template>
   <n-config-provider
+    cls-prefix="n"
     :locale="zhCN" :date-locale="dateZhCN"
     :theme="theme"
     :theme-overrides="themeOverrides"

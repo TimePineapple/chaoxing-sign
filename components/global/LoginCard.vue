@@ -152,7 +152,7 @@ async function goToResetPassword() {
 </script>
 
 <template>
-  <n-card>
+  <n-card class="login-card">
     <template #header>
       <h2 class="text-center text-xl">
         某星签到

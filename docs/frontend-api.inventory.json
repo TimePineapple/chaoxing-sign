@@ -1,0 +1,412 @@
+{
+  "schemaVersion": 1,
+  "sourceRevision": "1aacb32",
+  "checkedAt": "2026-09-15",
+  "verification": "Static source inspection only; no live API calls. Input fields describe existing callers, not runtime validation requirements.",
+  "counts": {
+    "apiSourceFiles": 18,
+    "implementedBusinessEndpoints": 16,
+    "frameworkHandlers": 1,
+    "emptyFiles": 1
+  },
+  "notes": [
+    "POST account operations require uid in JSON body even when path contains uid.",
+    "Business code is separate from HTTP status; code 200 does not prove successful sign-in activity.",
+    "Read FRONTEND_API.md and ARCHITECTURE.md before using this inventory.",
+    "QrCode url is currently sent by client but ignored by handler.",
+    "No account ownership check in shared Cx middleware; current response DTOs can leak sensitive fields."
+  ],
+  "frameworkAuthRoutes": [
+    {
+      "method": "GET",
+      "path": "/api/auth/providers"
+    },
+    {
+      "method": "GET",
+      "path": "/api/auth/csrf"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/callback/credentials",
+      "contentType": "application/x-www-form-urlencoded"
+    },
+    {
+      "method": "GET",
+      "path": "/api/auth/session"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/signout",
+      "contentType": "application/x-www-form-urlencoded"
+    }
+  ],
+  "endpoints": [
+    {
+      "method": "POST",
+      "path": "/api/auth/signUp",
+      "source": "server/api/auth/signUp.post.ts",
+      "status": "implemented",
+      "auth": "public",
+      "input": {
+        "location": "json-body",
+        "fieldsObserved": [
+          "email",
+          "password"
+        ]
+      },
+      "response": {
+        "envelope": "{code,message,data}",
+        "data": "User (currently includes password)"
+      },
+      "callers": [
+        "components/global/LoginCard.vue"
+      ]
+    },
+    {
+      "method": "*",
+      "path": "/api/auth/**",
+      "source": "server/api/auth/[...].ts",
+      "status": "framework-handler",
+      "auth": "framework managed",
+      "input": {
+        "location": "framework-specific",
+        "fieldsObserved": []
+      },
+      "response": "framework-specific",
+      "callers": [
+        "components/global/LoginCard.vue",
+        "components/global/UserButton.vue",
+        "pages/profile.vue"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/cx/accounts",
+      "source": "server/api/cx/accounts/index.get.ts",
+      "status": "implemented",
+      "auth": "website session cookie",
+      "input": {
+        "location": "query",
+        "fieldsObserved": []
+      },
+      "response": {
+        "envelope": "{code,message,data}",
+        "data": "AccountSnapshot[]"
+      },
+      "callers": [
+        "stores/account.ts"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/cx/login",
+      "source": "server/api/cx/login.post.ts",
+      "status": "implemented",
+      "auth": "website session cookie",
+      "input": {
+        "location": "json-body",
+        "fieldsObserved": [
+          "username",
+          "password"
+        ]
+      },
+      "response": {
+        "envelope": "{code,message,data}",
+        "data": "AccountLoginSnapshot | null"
+      },
+      "callers": [
+        "stores/account.ts"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/cx/logout",
+      "source": "server/api/cx/logout.post.ts",
+      "status": "implemented",
+      "auth": "website session cookie",
+      "input": {
+        "location": "json-body",
+        "fieldsObserved": [
+          "uid"
+        ]
+      },
+      "response": {
+        "envelope": "{code,message,data}",
+        "data": "null"
+      },
+      "callers": [
+        "stores/account.ts"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/cx/accounts/:uid/update_setting",
+      "source": "server/api/cx/accounts/[uid]/update_setting.post.ts",
+      "status": "implemented",
+      "auth": "website session cookie",
+      "input": {
+        "location": "json-body",
+        "fieldsObserved": [
+          "uid",
+          "setting"
+        ]
+      },
+      "response": {
+        "envelope": "{code,message,data}",
+        "data": "Setting"
+      },
+      "callers": [
+        "stores/account.ts"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/cx/accounts/:uid/monitor",
+      "source": "server/api/cx/accounts/[uid]/monitor.post.ts",
+      "status": "implemented",
+      "auth": "website session cookie",
+      "input": {
+        "location": "json-body",
+        "fieldsObserved": [
+          "uid"
+        ]
+      },
+      "response": {
+        "envelope": "{code,message,data}",
+        "data": "{data:{isOpened:boolean}}"
+      },
+      "callers": [
+        "stores/account.ts"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/cx/accounts/:uid/unmonitor",
+      "source": "server/api/cx/accounts/[uid]/unmonitor.post.ts",
+      "status": "implemented",
+      "auth": "website session cookie",
+      "input": {
+        "location": "json-body",
+        "fieldsObserved": [
+          "uid"
+        ]
+      },
+      "response": {
+        "envelope": "{code,message,data}",
+        "data": "{data:{isOpened:false}}"
+      },
+      "callers": [
+        "stores/account.ts"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/cx/accounts/:uid/sign_history",
+      "source": "server/api/cx/accounts/[uid]/sign_history.post.ts",
+      "status": "implemented",
+      "auth": "website session cookie",
+      "input": {
+        "location": "json-body",
+        "fieldsObserved": [
+          "uid"
+        ]
+      },
+      "response": {
+        "envelope": "{code,message,data}",
+        "data": "SignLog[]"
+      },
+      "callers": [
+        "components/SignHistory.vue"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/cx/accounts/:uid/sign_all",
+      "source": "server/api/cx/accounts/[uid]/sign_all.post.ts",
+      "status": "implemented",
+      "auth": "website session cookie",
+      "input": {
+        "location": "json-body",
+        "fieldsObserved": [
+          "uid",
+          "setting"
+        ]
+      },
+      "response": {
+        "envelope": "{code,message,data}",
+        "data": "SignResult[]"
+      },
+      "callers": [
+        "stores/account.ts"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/cx/accounts/:uid/sign_by_code",
+      "source": "server/api/cx/accounts/[uid]/sign_by_code.post.ts",
+      "status": "implemented",
+      "auth": "website session cookie",
+      "input": {
+        "location": "json-body",
+        "fieldsObserved": [
+          "uid",
+          "courseId",
+          "activityId",
+          "signCode"
+        ]
+      },
+      "response": {
+        "envelope": "{code,message,data}",
+        "data": "{activity,result} | null"
+      },
+      "callers": [
+        "stores/account.ts"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/cx/accounts/:uid/sign_by_gesture",
+      "source": "server/api/cx/accounts/[uid]/sign_by_gesture.post.ts",
+      "status": "implemented",
+      "auth": "website session cookie",
+      "input": {
+        "location": "json-body",
+        "fieldsObserved": [
+          "uid",
+          "courseId",
+          "activityId",
+          "signCode"
+        ]
+      },
+      "response": {
+        "envelope": "{code,message,data}",
+        "data": "{activity,result} | null"
+      },
+      "callers": [
+        "stores/account.ts"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/cx/accounts/:uid/sign_by_qrcode",
+      "source": "server/api/cx/accounts/[uid]/sign_by_qrcode.post.ts",
+      "status": "implemented",
+      "auth": "website session cookie",
+      "input": {
+        "location": "json-body",
+        "fieldsObserved": [
+          "uid",
+          "courseId",
+          "activityId",
+          "enc",
+          "code",
+          "url"
+        ]
+      },
+      "response": {
+        "envelope": "{code,message,data}",
+        "data": "{activity,result} | null"
+      },
+      "callers": [
+        "stores/account.ts"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/cx/courses",
+      "source": "server/api/cx/courses/index.get.ts",
+      "status": "implemented",
+      "auth": "website session cookie",
+      "input": {
+        "location": "query",
+        "fieldsObserved": [
+          "uid"
+        ]
+      },
+      "response": {
+        "envelope": "{code,message,data}",
+        "data": "Course[]"
+      },
+      "callers": [
+        "stores/account.ts"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/cx/courses/:cid",
+      "source": "server/api/cx/courses/[cid].get.ts",
+      "status": "empty-file",
+      "auth": "website session cookie",
+      "input": {
+        "location": "query",
+        "fieldsObserved": []
+      },
+      "response": "undefined",
+      "callers": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/cx/courses/:cid/activities",
+      "source": "server/api/cx/courses/[cid]/activities/index.post.ts",
+      "status": "implemented",
+      "auth": "website session cookie",
+      "input": {
+        "location": "json-body",
+        "fieldsObserved": [
+          "uid",
+          "course"
+        ]
+      },
+      "response": {
+        "envelope": "{code,message,data}",
+        "data": "ActivityItem[]"
+      },
+      "callers": [
+        "stores/account.ts"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/cx/courses/:cid/sign",
+      "source": "server/api/cx/courses/[cid]/sign.post.ts",
+      "status": "implemented",
+      "auth": "website session cookie",
+      "input": {
+        "location": "json-body",
+        "fieldsObserved": [
+          "uid",
+          "course"
+        ]
+      },
+      "response": {
+        "envelope": "{code,message,data}",
+        "data": "SignResult[] (log schema mismatch can prevent return)"
+      },
+      "callers": [
+        "stores/account.ts"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/cx/courses/:cid/activities/:aid/sign",
+      "source": "server/api/cx/courses/[cid]/activities/[aid]/sign.post.ts",
+      "status": "implemented",
+      "auth": "website session cookie",
+      "input": {
+        "location": "json-body",
+        "fieldsObserved": [
+          "uid",
+          "course",
+          "activity"
+        ]
+      },
+      "response": {
+        "envelope": "{code,message,data}",
+        "data": "{activity,result}"
+      },
+      "callers": [
+        "stores/account.ts"
+      ]
+    }
+  ]
+}

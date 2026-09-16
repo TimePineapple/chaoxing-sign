@@ -69,9 +69,9 @@ async function addAccount() {
     size="large"
     :bordered="false"
     :closable="false"
-    content-style="padding: 4px 20px;"
-    :style="{ 'max-width': '280px' }"
-    transform-origin="center"
+    class="mobile-sheet"
+    title="添加某星账号"
+    transform-origin="bottom"
   >
     <n-spin :show="loading">
       <n-form ref="formRef" :model="form" :rules="rules" :show-label="false">

@@ -4,6 +4,7 @@ import type { Got } from 'got'
 import { CookieJar } from 'tough-cookie'
 import * as cheerio from 'cheerio'
 import got from 'got'
+import { CxProxyError, getCxProxyOptions } from './proxy'
 
 export enum ActivityTypeEnum {
   Sign = 2, // 签到
@@ -39,6 +40,20 @@ export const signTypeMap: Record<number, string> = {
   5: '签到码签到',
 } as const
 
+export class CxLoginError extends Error {
+  constructor(public stage: '认证' | '读取资料', public code: string) {
+    const reason = code === 'ERR_CX_ACCESS_DENIED'
+      ? '请求被拒绝（403），请检查服务器出口网络或联系学习通支持'
+      : code === 'ERR_TOO_MANY_REDIRECTS'
+        ? '发生循环重定向，请稍后重试'
+        : code === 'ETIMEDOUT'
+          ? '请求超时，请稍后重试'
+          : '请求失败，请查看服务端日志'
+    super(`学习通${stage}${reason}`)
+    this.name = 'CxLoginError'
+  }
+}
+
 export class Cx {
   public http!: Got
   public cookieJar: CookieJar
@@ -50,11 +65,14 @@ export class Cx {
 
   constructor(user: Partial<CX.User>) {
     this.cookieJar = new CookieJar()
+    const proxyOptions = getCxProxyOptions()
 
     this.http = got.extend({
+      ...proxyOptions,
       responseType: 'json',
       cookieJar: this.cookieJar,
       hooks: {
+        ...proxyOptions.hooks,
         afterResponse: [
           (response) => {
             this.currentUrl = response.url
@@ -95,25 +113,51 @@ export class Cx {
   }
 
   async login(): Promise<string | null> {
-    if (/^1[3-9]\d{9}$/.test(this.user.username)) {
-      const { body: data } = await this.http.get<CX.LoginResult>('https://passport2.chaoxing.com/api/login', {
-        searchParams: {
-          name: this.user.username,
-          pwd: this.user.password,
-          schoolid: '',
-          verify: '',
-        },
-      })
+    this.user.logged = false
+    let stage: '认证' | '读取资料' = '认证'
+    try {
+      if (/^1[3-9]\d{9}$/.test(this.user.username)) {
+        const { body: data } = await this.http.get<CX.LoginResult>('https://passport2.chaoxing.com/api/login', {
+          timeout: { request: 15000 },
+          retry: { limit: 0 },
+          hooks: {
+            beforeRedirect: [
+              (options) => {
+                const target = options.url
+                if (target?.hostname.endsWith('.chaoxing.com')
+                  && target.pathname === '/views/error/passport403.html')
+                  throw new CxLoginError('认证', 'ERR_CX_ACCESS_DENIED')
+              },
+            ],
+          },
+          searchParams: {
+            name: this.user.username,
+            pwd: this.user.password,
+            schoolid: '',
+            verify: '',
+          },
+        })
 
-      if (!data.result)
-        return data.errorMsg
+        if (!data.result)
+          return data.errorMsg
 
-      await this.parseUserInfo(data)
-      this.user.logged = true
-      return '登录成功'
+        stage = '读取资料'
+        await this.parseUserInfo(data)
+        this.user.logged = true
+        return '登录成功'
+      }
+      else {
+        return '账号密码格式不正确'
+      }
     }
-    else {
-      return '账号密码格式不正确'
+    catch (error) {
+      // Do not log got errors directly: request URLs contain login credentials.
+      const code = error instanceof Error && 'code' in error && typeof error.code === 'string'
+        && /^[A-Z][A-Z0-9_]{0,63}$/.test(error.code) ? error.code : 'UPSTREAM_ERROR'
+      console.warn('[cx.login]', { stage, code })
+      if (error instanceof CxProxyError && code.startsWith('ERR_CX_PROXY_'))
+        throw error
+      throw new CxLoginError(stage, code)
     }
   }
 
@@ -130,7 +174,11 @@ export class Cx {
       uid: String(data.uid),
     } as unknown as CX.User
 
-    const { body: html } = await this.http.get(`http://i.chaoxing.com/base?t=${timestamp()}`, { responseType: 'text' })
+    const { body: html } = await this.http.get(`https://i.chaoxing.com/base?t=${timestamp()}`, {
+      responseType: 'text',
+      timeout: { request: 15000 },
+      retry: { limit: 0 },
+    })
 
     const $ = cheerio.load(html)
     this.user.avatar = `${$('.head-img').attr('src')! + this.user.uid}_80`

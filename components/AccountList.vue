@@ -27,27 +27,18 @@ tryOnMounted(() => {
 </script>
 
 <template>
-  <div>
-    <n-divider dashed>
-      <span class="space-x-2">
-        <span>账号列表</span>
-        <n-tooltip trigger="hover">
-          <template #trigger>
-            <Icon
-              name="material-symbols:cloud-sync-outline-rounded"
-              class="cursor-pointer"
-              :class="{ 'animate-spin': isSyncing }"
-              @click="handleSync()"
-            />
-          </template>
-          同步账号
-        </n-tooltip>
-      </span>
-    </n-divider>
+  <section class="account-section">
+    <div class="section-heading">
+      <h2>我的账号 <span class="count">{{ accountStore.accounts.length }}</span></h2>
+      <n-button secondary :loading="isSyncing" @click="handleSync()">
+        <template #icon><Icon name="material-symbols:cloud-sync-outline-rounded" /></template>
+        同步
+      </n-button>
+    </div>
 
     <ClientOnly>
       <template #fallback>
-        <div class="text-left grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
+        <div class="account-stack">
           <n-card v-for="i in 3" :key="i">
             <template #header>
               <n-space :size="10">
@@ -68,27 +59,23 @@ tryOnMounted(() => {
         </div>
       </template>
       <template v-if=" accountStore.accounts?.length! > 0">
-        <div class="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
+        <div class="account-stack">
           <AccountItem v-for="account in accountStore.accounts" v-bind="pick(account, ['uid', 'info', 'lastLoginTime', 'selected', 'setting'])" :key="account.uid" @click="selectAccount(account)" />
-          <n-card
-            cursor-pointer
-            @click="showLoginModal = true"
-          >
-            <div class="flex justify-center items-center h-full">
-              <Icon name="ic:outline-add-box" size="30" />
-            </div>
-          </n-card>
+          <n-button class="add-account-button" block dashed @click="showLoginModal = true">
+            <template #icon><Icon name="ic:outline-add-box" /></template>
+            添加账号
+          </n-button>
         </div>
       </template>
       <template v-else>
-        <div class="space-y-2">
+        <div class="empty-card">
           <n-empty description="暂无账号" size="small" />
-          <n-button @click="showLoginModal = true">
+          <n-button type="primary" block @click="showLoginModal = true">
             添加账号
           </n-button>
         </div>
       </template>
     </ClientOnly>
     <AccountLoginModal v-model:show="showLoginModal" @success="showLoginModal = false" />
-  </div>
+  </section>
 </template>

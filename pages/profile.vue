@@ -3,7 +3,7 @@ const { status, data } = useAuth()
 </script>
 
 <template>
-  <div class="w-full max-w-5xl mx-auto  bg-white px-5 py-4">
+  <div class="profile-card">
     <div v-if="status === 'authenticated'" class="flex flex-col justify-center items-center gap-4">
       <img
         v-if="data?.user?.image"
@@ -11,7 +11,7 @@ const { status, data } = useAuth()
         :src="data.user.image"
         alt="User Avatar"
       >
-      <h1 class="text-lg">
+      <h1 class="profile-name">
         {{ data?.user?.name }}
       </h1>
       <h2>

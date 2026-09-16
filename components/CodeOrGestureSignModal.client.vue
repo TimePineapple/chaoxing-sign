@@ -44,8 +44,8 @@ function handleClose() {
     :title="`${activity?.course?.name} | ${signTypeMap?.[activity?.otherId]}`"
     :bordered="false"
     :closable="true"
-    :style="{ 'max-width': '360px' }"
-    transform-origin="center"
+    class="mobile-sheet"
+    transform-origin="bottom"
     @after-enter="handleOpen"
     @after-leave="handleClose"
   >
