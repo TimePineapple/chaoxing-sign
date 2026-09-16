@@ -70,12 +70,18 @@ function handleRetryFailed() {
   if (!autoSelectFailedOnRetry.value)
     return
 
-  const failedUids = new Set(qrCodeResults.value.filter(item => item.status === 'error').map(item => item.uid))
+  const failedRows = qrCodeResults.value.filter(item => item.status === 'error')
+  const failedUids = new Set(failedRows.map(item => item.uid))
   if (failedUids.size === 0) {
     retryFailedAvailable.value = false
     return
   }
 
+  qrCodeResults.value = failedRows.map(item => ({
+    ...item,
+    status: 'pending',
+    message: '等待扫描',
+  }))
   accountStore.accounts.forEach((account) => {
     account.selected = failedUids.has(account.uid)
   })

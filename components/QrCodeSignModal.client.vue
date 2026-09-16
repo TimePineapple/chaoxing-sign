@@ -323,8 +323,9 @@ function handleUpload() {
 
     <span>若有签到链接，可直接在下方输入</span>
     <n-input-group>
-      <n-input v-model:value="text" placeholder="签到链接" clearable :disabled="loading" />
+      <n-input class="qr-url-input" v-model:value="text" placeholder="签到链接" clearable :disabled="loading" />
       <n-button
+        class="qr-url-submit"
         type="primary"
         :loading="loading"
         :disabled="!text.trim() || scanLocked"
@@ -352,5 +353,18 @@ function handleUpload() {
   margin: 2px 0 0;
   font-size: 12px;
   line-height: 1.4;
+}
+
+:deep(.n-input-group > .qr-url-input),
+:deep(.n-input-group > .qr-url-submit) {
+  border-radius: 14px !important;
+  margin-left: 0 !important;
+}
+
+:deep(.n-input-group > .qr-url-input .n-input__border),
+:deep(.n-input-group > .qr-url-input .n-input__state-border),
+:deep(.n-input-group > .qr-url-submit .n-button__border),
+:deep(.n-input-group > .qr-url-submit .n-button__state-border) {
+  border-radius: 14px !important;
 }
 </style>
