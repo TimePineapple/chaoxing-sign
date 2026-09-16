@@ -32,9 +32,10 @@
 
 | 方法/路径 | 输入 | 当前返回 | 调用方 |
 | --- | --- | --- | --- |
-| POST `/api/auth/signUp` | `{email:string,password:string}` | 包装后的完整 Prisma User | `components/global/LoginCard.vue` |
+| GET `/api/auth/registration-status` | 无 | `{enabled:boolean,expiresAt:string\|null}`，`Cache-Control: no-store` | `components/global/LoginCard.vue` |
+| POST `/api/auth/signUp` | `{email:string,password:string}` | 包装后的 `{id,email,name}` | `components/global/LoginCard.vue` |
 
-现有前端还发送 `reenteredPassword`、`privatePolicy`，后端只读取 email/password；没有邮件验证、验证码或重置密码实现。邮箱格式错误/重复时抛 H3 错误，未显式设置业务 HTTP 状态。注册成功不自动登录。返回 User 含 password，应先修复响应脱敏，新前端不要保存该响应。
+现有前端还发送 `reenteredPassword`、`privatePolicy`，后端只读取 email/password；没有邮件验证、验证码或重置密码实现。邮箱格式错误/重复时抛 H3 错误，未显式设置业务 HTTP 状态。注册成功不自动登录。网页账户注册默认关闭；只在服务端启动后的五分钟窗口内开放，到期 POST 返回 403。此开关与学习通账户绑定无关。
 
 ### 2.2 NextAuth 通配认证
 
@@ -59,7 +60,8 @@
 | 方法/路径 | 输入 | 返回 | 副作用/异常 | 调用方 |
 | --- | --- | --- | --- | --- |
 | GET `/api/cx/accounts` | 无 | AccountSnapshot[]，含 courses/signlogs | 查询当前网站用户；过 7 天尝试重登；本次响应仍可能是刷新前快照；不含 selected | store.syncAccounts |
-| POST `/api/cx/login` | `{username,password}`，当前只支持手机号 | AccountLoginSnapshot | 绑定/更新账号；最多 6 个；失败为业务 code=201、data=null；成功 message=登录成功 | store.login |
+| POST `/api/cx/login` | `{username,password}`，当前只支持手机号 | AccountLoginSnapshot | 绑定/更新账号；无账号数量限制；失败为业务 code=201、data=null；成功 message=登录成功 | store.login |
+| GET `/api/cx/connectivity` | 无 | `{ok:boolean,message?:string}` | 客户端每次加载网站并进入已登录状态时，服务端经 `CX_PROXY_URL` 访问学习通登录页；失败时客户端显示持续通知 | `CxConnectivityCheck.client` |
 | POST `/api/cx/logout` | `{uid}` | null | **删除绑定及其本站签到历史**，关闭监听/清 Cookie；不是网站 signOut | store.logout |
 | POST `/api/cx/accounts/:uid/update_setting` | `{uid,setting}` | Setting | 整体覆盖 setting，不是 patch；未同步进程内 Cx.setting；账号不存在 code=204 | store.updateSetting |
 | POST `/api/cx/accounts/:uid/monitor` | `{uid}` | `{data:{isOpened:boolean}}` | 建立服务端监听；已在 Map 中直接返回 true；无独立健康状态接口 | store.monitorAccount |
@@ -98,6 +100,8 @@
 后三项活动不存在：业务 code=204、data=null；活动已结束/非签到：code=200、result 文本且提前返回，不写日志。正常执行分支保存手动 SignLog；如果写数据库失败，外部操作可能已经发生。
 
 二维码适配：当前 store 从链接 query 的 `id`、`c`、`enc` 提取 activityId/code/enc，courseId 来自活动上下文。新前端可用 URL/URLSearchParams 做有校验的解析，但不能把链接内未提供的 courseId 当作已知；直接扫码入口需明确获取上下文的方式。
+
+批量扫码按选中账号顺序错峰启动：每发起一个账号请求后等待 200ms，再发起下一个账号请求；无需等待前一个账号返回。每个账号使用独立 HTTP 请求，响应到达后立即更新客户端对应账号的结果，不生成统一汇总结果。
 
 签到结果文本常见：`签到成功`、`已签到过`、`签到已过期`、`失败`、`未知签到类型`、`该账号不支持此签到类型`、`不是签到活动或活动已结束`，以及原样透传的上游文本。文本不是封闭枚举，界面应保留未知结果。
 
@@ -152,7 +156,7 @@ type AccountView = {
 // AccountView 是建议的最小视图；当前接口还有多余敏感字段，需适配/后端脱敏。
 ```
 
-默认设置：location.text 为空、latitude/longitude 为字符串 `-1`、monitor=false、signType=`["0","2","3","4","5"]`、delay=2000。后台延迟用 `cx.setting?.delay || 随机延迟`，所以 0 当前不会表达“无延迟”。手动签到内部还存在固定等待，不能把 delay 视为所有请求的统一计时参数。
+默认设置：location.text 为空、latitude/longitude 为字符串 `-1`、monitor=false、signType=`["0","2","3","4","5"]`、delay=200。后台延迟用 `cx.setting?.delay || 随机延迟`，所以 0 当前不会表达“无延迟”。手动签到内部还存在固定等待，不能把 delay 视为所有请求的统一计时参数。
 
 | 字段 | 值 |
 | --- | --- |

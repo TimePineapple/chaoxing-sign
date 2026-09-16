@@ -3,11 +3,15 @@
 import { createApp, h } from 'vue'
 import { QrcodeCapture } from 'vue-qrcode-reader'
 import { describe, expect, it, vi } from 'vitest'
-import { createQrCodeSubmissionGuard, parseQrCodeSignLink } from './qrCodeSign'
+import { createQrCodeSubmissionGuard, formatQrCodeFeedbackTime, parseQrCodeSignLink } from './qrCodeSign'
 
 const signLink = 'https://mobilelearn.chaoxing.com/widget/sign/e?enc=ABC123&id=8000063022220&c=529773'
 
 describe('QR code sign submission', () => {
+  it('formats feedback with only local time', () => {
+    expect(formatQrCodeFeedbackTime(new Date(2026, 0, 2, 3, 4, 5))).toBe('03:04:05')
+  })
+
   it('extracts required fields regardless of query parameter order', () => {
     expect(parseQrCodeSignLink(signLink)).toEqual({
       link: signLink,

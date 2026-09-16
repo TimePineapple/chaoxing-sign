@@ -120,11 +120,13 @@ describe('batch QR scan component -> store -> API with mocked upstream', () => {
       savedCourses.set(uid, { courseId: `course-${uid}` })
     }
     await component.$.setupState.handleSuccess(signLink)
+    await vi.waitFor(() => expect(component.$.setupState.qrCodeLoading).toBe(false))
     expect(request).toHaveBeenCalledTimes(2)
     expect(clients.get('a').preSign).toHaveBeenCalledWith(expect.objectContaining({ courseId: 'course-a', classId: 300 }), expect.anything())
     expect(clients.get('b').preSign).toHaveBeenCalledWith(expect.objectContaining({ courseId: 'course-b', classId: 300 }), expect.anything())
     expect(clients.get('a').getCourseList).not.toHaveBeenCalled()
-    expect(container.textContent).toContain('批量扫码完成：成功 2 个，失败 0 个')
+    expect(container.textContent).toContain('Account a (a): 签到成功')
+    expect(container.textContent).toContain('Account b (b): 签到成功')
   })
 
   it('uses the account course cache before the database or network', async () => {
@@ -161,6 +163,7 @@ describe('batch QR scan component -> store -> API with mocked upstream', () => {
   it('writes matching client and server trace IDs for each account without QR tokens', async () => {
     const info = vi.spyOn(console, 'info').mockImplementation(() => {})
     await component.$.setupState.handleSuccess(signLink)
+    await vi.waitFor(() => expect(component.$.setupState.qrCodeLoading).toBe(false))
     expect(request).toHaveBeenCalledTimes(2)
     const traceIds = request.mock.calls.map(([, options]) => options.headers['x-qr-sign-trace-id'])
     expect(new Set(traceIds).size).toBe(2)
@@ -169,7 +172,7 @@ describe('batch QR scan component -> store -> API with mocked upstream', () => {
       expect(info).toHaveBeenCalledWith(`[qr-code-sign][${traceId}] 客户端发送请求`)
       expect(info).toHaveBeenCalledWith(`[qr-code-sign][${traceId}] request received`, expect.objectContaining({ elapsedMs: expect.any(Number) }))
       expect(info).toHaveBeenCalledWith(`[qr-code-sign][${traceId}] request complete`, expect.objectContaining({ success: true }))
-      expect(container.textContent).toContain(`追踪号 ${traceId}`)
+      expect(container.textContent).not.toContain(`追踪号 ${traceId}`)
     }
     expect(info.mock.calls.flat().join(' ')).not.toContain('FIXTURE')
   })
@@ -184,7 +187,7 @@ describe('batch QR scan component -> store -> API with mocked upstream', () => {
       expect(clients.get(uid).save).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ accountId: uid }) }))
     }
     expect(clients.get('not-selected').signQrCode).not.toHaveBeenCalled()
-    expect(log).toHaveBeenCalledWith('批量扫码完成：成功 2 个，失败 0 个', { type: 'success' })
+    expect(container.textContent).not.toContain('批量扫码完成')
   })
 
   it('shows a non-empty per-account reason when every upstream request throws', async () => {
@@ -192,20 +195,21 @@ describe('batch QR scan component -> store -> API with mocked upstream', () => {
     for (const uid of ['a', 'b'])
       clients.get(uid).getActivityDetail.mockRejectedValue(Object.assign(new Error('private request details'), { code: 'ECONNRESET' }))
     await component.$.setupState.handleSuccess(signLink)
-    await nextTick()
+    await vi.waitFor(() => expect(component.$.setupState.qrCodeLoading).toBe(false))
     expect(container.textContent).toContain('Account a (a): 读取活动详情失败（ECONNRESET）')
     expect(container.textContent).toContain('Account b (b): 读取活动详情失败（ECONNRESET）')
     expect(container.textContent).not.toContain('private request details')
-    expect(log).toHaveBeenCalledWith('批量扫码完成：成功 0 个，失败 2 个', { type: 'error' })
+    expect(log).toHaveBeenCalledWith('账号: Account a (a) 扫码失败: 读取活动详情失败（ECONNRESET）', { type: 'error' })
+    expect(log).toHaveBeenCalledWith('账号: Account b (b) 扫码失败: 读取活动详情失败（ECONNRESET）', { type: 'error' })
     expect(component.$.setupState.qrCodeLoading).toBe(false)
   })
 
   it('separates success from upstream rejection and preserves the rejection text', async () => {
     clients.get('b').signQrCode.mockResolvedValue('签到已过期')
     await component.$.setupState.handleSuccess(signLink)
-    await nextTick()
+    await vi.waitFor(() => expect(component.$.setupState.qrCodeLoading).toBe(false))
     expect(container.textContent).toContain('Account b (b): 签到已过期')
-    expect(log).toHaveBeenCalledWith('批量扫码完成：成功 1 个，失败 1 个', { type: 'warning' })
+    expect(container.textContent).not.toContain('批量扫码完成')
   })
 
   it('preserves API error messages instead of destructuring null data', async () => {
@@ -236,15 +240,17 @@ describe('batch QR scan component -> store -> API with mocked upstream', () => {
   it('shows HTTP login errors and allows a new submission after failure', async () => {
     request.mockRejectedValueOnce({ statusCode: 401, data: { message: '登录已过期,请重新登录' } })
     await component.$.setupState.handleSuccess(signLink)
-    await nextTick()
+    await vi.waitFor(() => expect(component.$.setupState.qrCodeLoading).toBe(false))
     expect(container.textContent).toContain('登录已过期,请重新登录')
     await component.$.setupState.handleSuccess(signLink)
-    expect(log).toHaveBeenLastCalledWith('批量扫码完成：成功 2 个，失败 0 个', { type: 'success' })
+    await vi.waitFor(() => expect(component.$.setupState.qrCodeLoading).toBe(false))
+    expect(container.textContent).toContain('Account b (b): 签到成功')
   })
 
   it('does not send a course from a previous activity, and prefers the server activity course', async () => {
     component.$.setupState.doingActivity = { id: 99, course: { courseId: 'old-course' } }
     await component.$.setupState.handleSuccess(signLink)
+    await vi.waitFor(() => expect(component.$.setupState.qrCodeLoading).toBe(false))
     expect(request.mock.calls[0][1].body.courseId).toBeUndefined()
     await store.signByQrCode('a', signLink, 'old-course')
     expect(clients.get('a').preSign).toHaveBeenLastCalledWith(
@@ -257,37 +263,54 @@ describe('batch QR scan component -> store -> API with mocked upstream', () => {
     request.mockReturnValue(new Promise(done => { resolve = done }))
     const pending = component.$.setupState.handleSuccess(signLink)
     await component.$.setupState.handleSuccess(signLink)
-    expect(request).toHaveBeenCalledTimes(2)
+    expect(request).toHaveBeenCalledTimes(1)
     resolve(ResOp.success({ activity: { otherId: 2 }, result: '签到成功' }))
     await pending
+    await vi.waitFor(() => expect(component.$.setupState.qrCodeLoading).toBe(false))
+    expect(request).toHaveBeenCalledTimes(2)
     store.accounts.value = []
     await component.$.setupState.handleSuccess(signLink)
     expect(request).toHaveBeenCalledTimes(2)
     expect(log).toHaveBeenLastCalledWith('请先选择账号', { type: 'warning' })
   })
 
-  it('renders each completed account while another response is still pending', async () => {
-    let finish!: (value: unknown) => void
-    request.mockImplementationOnce(() => Promise.resolve(ResOp.success({ activity: { otherId: 2 }, result: '签到成功' })))
-    request.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+  it('starts accounts 200ms apart without waiting for the previous result', async () => {
+    let finishFirst!: (value: unknown) => void
+    let finishSecond!: (value: unknown) => void
+    let firstStartedAt = 0
+    let secondStartedAt = 0
+    request.mockImplementationOnce(() => {
+      firstStartedAt = Date.now()
+      return new Promise(resolve => { finishFirst = resolve })
+    })
+    request.mockImplementationOnce(() => {
+      secondStartedAt = Date.now()
+      return new Promise(resolve => { finishSecond = resolve })
+    })
     const pending = component.$.setupState.handleSuccess(signLink)
     await nextTick()
-    await vi.waitFor(() => expect(container.textContent).toContain('Account a (a): 签到成功'))
+    expect(request).toHaveBeenCalledTimes(1)
+    await vi.waitFor(() => expect(request).toHaveBeenCalledTimes(2))
+    expect(secondStartedAt - firstStartedAt).toBeGreaterThanOrEqual(180)
+    expect(container.textContent).toContain('Account a (a): 请求已发起')
     expect(container.textContent).toContain('Account b (b): 请求已发起')
     expect(component.$.setupState.qrCodeLoading).toBe(true)
-    finish(ResOp.success({ activity: { otherId: 2 }, result: '签到已过期' }))
+    finishFirst(ResOp.success({ activity: { otherId: 2 }, result: '签到成功' }))
+    await vi.waitFor(() => expect(container.textContent).toContain('Account a (a): 签到成功'))
+    finishSecond(ResOp.success({ activity: { otherId: 2 }, result: '签到已过期' }))
     await pending
-    await nextTick()
-    expect(container.textContent).toContain('批量扫码完成：成功 1 个，失败 1 个')
+    await vi.waitFor(() => expect(component.$.setupState.qrCodeLoading).toBe(false))
+    expect(container.textContent).toContain('Account b (b): 签到已过期')
+    expect(container.textContent).not.toContain('批量扫码完成')
   })
 
   it('preserves results even when toast or log rendering throws', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {})
     log.mockImplementation(() => { throw new Error('message render failed') })
     await component.$.setupState.handleSuccess(signLink)
-    await nextTick()
+    await vi.waitFor(() => expect(component.$.setupState.qrCodeLoading).toBe(false))
     expect(container.textContent).toContain('Account a (a): 签到成功')
-    expect(container.textContent).toContain('批量扫码完成：成功 2 个，失败 0 个')
+    expect(container.textContent).not.toContain('批量扫码完成')
     expect(component.$.setupState.qrCodeLoading).toBe(false)
     expect(request.mock.calls[0][1]).toMatchObject({ timeout: 45000, retry: 0 })
   })
@@ -295,7 +318,7 @@ describe('batch QR scan component -> store -> API with mocked upstream', () => {
   it('shows an uncertain outcome on timeout without exposing request URLs', async () => {
     request.mockRejectedValue({ name: 'FetchError', cause: { name: 'TimeoutError' } })
     await component.$.setupState.handleSuccess(signLink)
-    await nextTick()
+    await vi.waitFor(() => expect(component.$.setupState.qrCodeLoading).toBe(false))
     expect(container.textContent).toContain('等待签到响应超时，结果尚未确认')
     expect(component.$.setupState.qrCodeLoading).toBe(false)
   })

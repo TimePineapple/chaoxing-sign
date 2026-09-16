@@ -14,6 +14,7 @@ const emit = defineEmits<{
 }>()
 
 const saving = ref(false)
+const removing = ref(false)
 const accountStore = useAccountStore()
 
 const show = computed({
@@ -32,6 +33,14 @@ async function handleSave() {
   await accountStore.updateSetting(props.uid, unref(form)).finally(() => {
     saving.value = false
   })
+}
+
+async function handleLogout() {
+  removing.value = true
+  await accountStore.logout(props.uid).finally(() => {
+    removing.value = false
+  })
+  show.value = false
 }
 
 function handleReset() {
@@ -148,7 +157,7 @@ watch(show, (value) => {
             </n-space>
           </n-checkbox-group>
         </n-form-item>
-        <n-form-item>
+        <n-form-item class="setting-actions">
           <n-space justify="end">
             <n-button @click="handleReset">
               重置
@@ -157,6 +166,17 @@ watch(show, (value) => {
               保存
             </n-button>
           </n-space>
+        </n-form-item>
+        <n-form-item class="setting-remove">
+          <n-popconfirm :negative-text="null" @positive-click="handleLogout()">
+            <template #trigger>
+              <n-button block secondary type="error" :loading="removing">
+                <template #icon><Icon name="material-symbols:logout-sharp" /></template>
+                移除账号
+              </n-button>
+            </template>
+            确认退出? 这将会清空本系统该账号的所有信息
+          </n-popconfirm>
         </n-form-item>
       </n-form>
     </n-spin>

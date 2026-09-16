@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useDateFormat } from '@vueuse/core'
 import { SignTypeEnum } from '~/constants/cx'
+import { formatQrCodeFeedbackTime, qrCodeRequestError } from '~/utils/qrCodeSign'
 
 const props = defineProps<{
   uid: string
@@ -13,11 +14,11 @@ const props = defineProps<{
 
 const emit = defineEmits<{ (e: 'click'): void }>()
 
-const ms = useMessage()
 const accountStore = useAccountStore()
 
 const loading = ref(false)
 const qrCodeLoading = ref(false)
+const qrCodeResult = ref<{ time: string; status: 'pending' | 'success' | 'error'; message: string } | null>(null)
 const showQrCodeModal = ref(false)
 const showCodeOrGestureModal = ref(false)
 
@@ -27,58 +28,24 @@ const showSignHistory = ref(false)
 // 正在执行中的活动
 const doingActivity = ref<CX.ActivityItem | null>(null)
 
-const monitor = ref(props.setting.monitor)
-
-async function oneClickSign(uid: string) {
-  loading.value = true
-
-  const data = await accountStore.oneClickSign(uid).finally(() => {
-    loading.value = false
-  }) as CX.SignResult[]
-
-  // // 如果一键签到中有二维码签到的课程,则弹出二维码扫码签到的弹窗
-  const QrCodeSignActivity = data.find(item => item.signType === SignTypeEnum.QRCode)?.activity
-
-  if (QrCodeSignActivity) {
-    doingActivity.value = QrCodeSignActivity
-    ms.warning(`检测到有二维码签到的课程[${QrCodeSignActivity.course?.name}],请扫码`, { duration: 20 * 1000, closable: true })
-    showQrCodeModal.value = true
-    return
-  }
-
-  // 检测到签到码签到
-  const CodeSignActivity = data.find(item => item.signType === SignTypeEnum.Code)?.activity
-
-  if (CodeSignActivity) {
-    doingActivity.value = CodeSignActivity
-    ms.warning(`检测到有签到码签到的课程[${CodeSignActivity.course?.name}],请输入签到码, 如 1234`, { duration: 20 * 1000, closable: true })
-    showCodeOrGestureModal.value = true
-    return
-  }
-
-  // 检测到手势签到
-  const GestureSignActivity = data.find(item => item.signType === SignTypeEnum.Gesture)?.activity
-
-  if (GestureSignActivity) {
-    doingActivity.value = GestureSignActivity
-    ms.warning(`检测到有手势签到的课程[${GestureSignActivity.course?.name}],请输入手势轨迹, 如 123654789`, { duration: 20 * 1000, closable: true })
-    showCodeOrGestureModal.value = true
-  }
-}
-
-async function handleLogout() {
-  loading.value = true
-
-  await accountStore.logout(props.uid).finally(() => {
-    loading.value = false
-  })
-}
-
 async function handleQrCodeSignSuccess(result: string) {
+  if (qrCodeLoading.value)
+    return
+
+  const time = formatQrCodeFeedbackTime()
+  qrCodeResult.value = { time, status: 'pending', message: '请求已发起，等待服务器返回（最多 45 秒）' }
   qrCodeLoading.value = true
 
   try {
-    await accountStore.signByQrCode(props.uid, result, doingActivity.value?.course?.courseId)
+    const data = await accountStore.signByQrCode(props.uid, result, doingActivity.value?.course?.courseId)
+    qrCodeResult.value = {
+      time,
+      status: data?.result === '签到成功' ? 'success' : 'error',
+      message: data?.result?.trim() || '签到接口未返回有效结果',
+    }
+  }
+  catch (error) {
+    qrCodeResult.value = { time, status: 'error', message: qrCodeRequestError(error) }
   }
   finally {
     qrCodeLoading.value = false
@@ -105,25 +72,6 @@ async function handleCodeOrGestureSignSuccess(result: string) {
   }
 }
 
-async function handleMonitor() {
-  loading.value = true
-
-  await accountStore.monitorAccount(props.uid).finally(() => {
-    loading.value = false
-  })
-
-  monitor.value = true
-}
-
-async function handleUnMonitor() {
-  loading.value = true
-
-  await accountStore.unMonitorAccount(props.uid).finally(() => {
-    loading.value = false
-  })
-
-  monitor.value = false
-}
 </script>
 
 <template>
@@ -142,10 +90,6 @@ async function handleUnMonitor() {
         </div>
       </template>
 
-      <template #header-extra>
-        <span class="status-badge" :class="{ 'status-active': monitor }">{{ monitor ? '监听中' : '未监听' }}</span>
-      </template>
-
       <div class="account-meta">
         <p>
           最近登录时间: {{ useDateFormat(lastLoginTime, 'YYYY-MM-DD HH:mm:ss').value }}
@@ -154,27 +98,22 @@ async function handleUnMonitor() {
 
       <template #action>
         <div class="account-actions" @click.stop>
-          <div class="primary-actions">
-            <n-button type="primary" @click="oneClickSign(uid)"><template #icon><Icon name="material-symbols:swipe-up-outline" /></template>一键签到</n-button>
-            <n-button secondary @click="showQrCodeModal = true"><template #icon><Icon name="mdi:qrcode-scan" /></template>扫码签到</n-button>
-          </div>
-          <div class="secondary-actions">
-            <NuxtLink :to="`/account/${uid}`" class="action-link"><Icon name="material-symbols:medical-information-outline-sharp" />课程</NuxtLink>
-            <n-popconfirm v-if="monitor" :negative-text="null" @positive-click="handleUnMonitor()">
-              <template #trigger><n-button quaternary><template #icon><Icon name="material-symbols:notifications-off-outline" /></template>取消监听</n-button></template>
-              确认取消监听该账号签到任务?
-            </n-popconfirm>
-            <n-button v-else quaternary @click="handleMonitor()"><template #icon><Icon name="material-symbols:notifications-active-outline" /></template>监听</n-button>
-            <n-button quaternary @click="showSignHistory = true"><template #icon><Icon name="material-symbols:history-rounded" /></template>记录</n-button>
-            <n-button quaternary @click="showSettingModal = true"><template #icon><Icon name="material-symbols:settings-outline" /></template>设置</n-button>
-            <n-popconfirm :negative-text="null" @positive-click.stop="handleLogout()">
-              <template #trigger><n-button quaternary type="error"><template #icon><Icon name="material-symbols:logout-sharp" /></template>移除账号</n-button></template>
-              确认退出? 这将会清空本系统该账号的所有信息
-            </n-popconfirm>
+          <div class="account-action-layout">
+            <n-button class="account-scan-button" type="primary" @click="qrCodeResult = null; showQrCodeModal = true"><template #icon><Icon name="mdi:qrcode-scan" /></template>扫码签到</n-button>
+            <div class="account-mini-actions">
+              <n-button quaternary class="account-mini-button" @click="showSignHistory = true"><template #icon><Icon name="material-symbols:history-rounded" /></template>记录</n-button>
+              <n-button quaternary class="account-mini-button" @click="showSettingModal = true"><template #icon><Icon name="material-symbols:settings-outline" /></template>设置</n-button>
+            </div>
           </div>
         </div>
       </template>
-      <QrCodeSignModal v-model:show="showQrCodeModal" :title="doingActivity?.course.name" :loading="qrCodeLoading" @success="handleQrCodeSignSuccess" />
+      <QrCodeSignModal v-model:show="showQrCodeModal" :title="doingActivity?.course.name" :loading="qrCodeLoading" @success="handleQrCodeSignSuccess">
+        <template #result>
+          <p v-if="qrCodeResult" role="status">
+            <n-text :type="qrCodeResult.status === 'pending' ? 'info' : qrCodeResult.status">{{ qrCodeResult.time }} {{ info.realname }} ({{ uid }}): {{ qrCodeResult.message }}</n-text>
+          </p>
+        </template>
+      </QrCodeSignModal>
       <CodeOrGestureSignModal v-model:show="showCodeOrGestureModal" :activity="doingActivity!" :loading="loading" @success="handleCodeOrGestureSignSuccess" />
       <SignHistory v-model:show="showSignHistory" :uid="uid" />
       <SettingModal v-if="showSettingModal" v-model:show="showSettingModal" :uid="uid" :setting="setting" />

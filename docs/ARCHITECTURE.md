@@ -71,10 +71,11 @@ Nuxt 自动导入组件、Vue/Nuxt 工具及 store；许多文件没有显式 im
 ### 首页组件职责
 
 - `AccountList`：挂载时同步账号、列表选择、添加账号入口。
-- `AccountLoginModal.client`：手机号和密码表单，经 store 登录超星；网站账号最多绑定 6 个超星账号的限制在服务端。
+- `AccountLoginModal.client`：手机号和密码表单，经 store 登录超星；服务端不限制绑定的超星账号数量。
 - `AccountItem`：账号卡片、移除确认、单账号签到、监听切换、历史及设置弹窗。
-- `Operation`：全选、多账号并发操作；没有后端批量接口，是前端逐账号 `Promise.allSettled`。
+- `Operation`：全选、多账号错峰操作；没有后端批量接口。前端每隔 200ms 发起一个独立请求，各账号响应到达后立即更新对应结果。
 - `QrCodeSignModal.client`：摄像头、图片选择/拖入、本地识别、粘贴链接、二维码预览；图片不上传到项目后端。
+- `CxConnectivityCheck.client`：客户端每次加载网站并进入已认证状态后调用一次服务端连通性检测；失败时显示持续的大型通知卡片。
 - `CodeOrGestureSignModal.client`：收集签到码或手势轨迹；由父组件携带活动上下文提交。
 - `SettingModal.client`：延迟、地址/坐标、允许签到类型。照片上传和设置中的监听开关没有启用。
 - `SignHistory`：打开时请求本站数据库记录；与 `Log` 的浏览器操作日志不同。

@@ -67,10 +67,13 @@ useHead({
     <VitePwaManifest />
     <NuxtLoadingIndicator />
 
-    <n-message-provider keep-alive-on-hover>
-      <NuxtLayout>
-        <NuxtPage />
-      </NuxtLayout>
-    </n-message-provider>
+    <n-notification-provider placement="top-right" :max="2">
+      <CxConnectivityCheck />
+      <n-message-provider keep-alive-on-hover>
+        <NuxtLayout>
+          <NuxtPage />
+        </NuxtLayout>
+      </n-message-provider>
+    </n-notification-provider>
   </n-config-provider>
 </template>

@@ -76,8 +76,9 @@ it('shows batch failures inside the real modal after a video detection event', a
   await vi.waitFor(() => expect(document.querySelector('[data-testid="camera-frame"]')).not.toBeNull())
   document.querySelector<HTMLButtonElement>('[data-testid="camera-frame"]')!.click()
   await vi.waitFor(() => expect(document.querySelector('[aria-label="各账号扫码结果"]')?.textContent).toContain('模拟：登录已过期'))
-  expect(document.querySelector('[role="dialog"]')?.textContent).toContain('批量扫码完成：成功 0 个，失败 2 个')
-  expect(request).toHaveBeenCalledTimes(2)
+  await vi.waitFor(() => expect(request).toHaveBeenCalledTimes(2))
+  await vi.waitFor(() => expect(document.querySelector('[aria-label="各账号扫码结果"]')?.textContent).toContain('fixture-b (fixture-b): 模拟：登录已过期'))
+  expect(document.querySelector('[role="dialog"]')?.textContent).not.toContain('批量扫码完成')
   expect(errors).toEqual([])
   app.unmount()
   app = undefined

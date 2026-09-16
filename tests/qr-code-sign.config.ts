@@ -12,6 +12,12 @@ export default defineConfig({
   resolve: { alias: { '~': fileURLToPath(new URL('../', import.meta.url)) } },
   test: {
     environment: 'jsdom',
-    include: ['tests/qr-code-sign.integration.ts', 'tests/qr-code-sign.ui.ts', 'utils/qrCodeSign.unit.test.ts'],
+    include: [
+      'tests/qr-code-sign.integration.ts',
+      'tests/qr-code-sign.ui.ts',
+      'tests/cx-connectivity.client.test.ts',
+      'server/protocol/cx/connectivity.unit.test.ts',
+      'utils/qrCodeSign.unit.test.ts',
+    ],
   },
 })

@@ -1,4 +1,9 @@
+import { registrationWindow } from '~~/server/utils/registration'
+
 export default defineEventHandler(async (event) => {
+  if (!registrationWindow.status().enabled)
+    throw createError({ statusCode: 403, message: '网页账户注册已关闭' })
+
   // const { email, password, code } = await readBody(event) as { email: string; password: string; code: string }
   const { email, password } = await readBody(event) as { email: string; password: string }
 
@@ -13,6 +18,9 @@ export default defineEventHandler(async (event) => {
   if (exists)
     throw createError({ statusMessage: '邮箱已被注册' })
 
+  if (!registrationWindow.status().enabled)
+    throw createError({ statusCode: 403, message: '网页账户注册已关闭' })
+
   const user = await event.context.prisma.user.create({
     data: {
       email,
@@ -21,5 +29,5 @@ export default defineEventHandler(async (event) => {
     },
   })
 
-  return ResOp.success(user)
+  return ResOp.success({ id: user.id, email: user.email, name: user.name })
 })

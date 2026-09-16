@@ -11,7 +11,6 @@
           <Hero />
           <AccountList />
           <Operation />
-          <Log />
         </div>
       </div>
     </Suspense>

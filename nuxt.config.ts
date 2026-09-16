@@ -1,3 +1,8 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+
+const footerConfig = JSON.parse(readFileSync(resolve(process.cwd(), 'public/footer-config.json'), 'utf8'))
+
 export default defineNuxtConfig({
   app: {
     keepalive: true,
@@ -29,6 +34,9 @@ export default defineNuxtConfig({
   runtimeConfig: {
     im: {
       initConnect: false,
+    },
+    public: {
+      footerConfig,
     },
   },
   modules: [

@@ -1,41 +1,34 @@
 <script setup lang="ts">
 import { useThemeVars } from 'naive-ui'
-import pkg from '~/package.json'
+
+interface FooterConfig {
+  githubUrl: string
+  version: string
+  buildText: string
+  authorName: string
+  originalAuthorName: string
+  authorUrl: string
+  originalAuthorUrl: string
+}
 
 const themeVars = useThemeVars()
+const footer = useRuntimeConfig().public.footerConfig as FooterConfig
 </script>
 
 <template>
-  <footer class="mobile-footer" :style="{ borderColor: themeVars.borderColor }">
-    <div class="footer-content">
-      <div class="footer-details">
-        <div class="footer-links">
-          <NuxtLink :to="pkg.author.url" target="_blank" class="flex items-center gap-1 text-xs">
-            <i class="i-ri-user-star-line" />
-            <p class="font-semibold">
-              作者: {{ pkg.author.name }}
-            </p>
-          </NuxtLink>
-          <span class="flex items-center gap-1 text-xs">
-            <i class="i-ri-file-code-line" />
-            <p class="font-semibold">
-              版本: {{ pkg.version }}
-            </p>
-          </span>
-          <div class="flex items-center gap-1 text-xs">
-            <i class="i-ri-building-2-line " />
-            <span class="font-semibold">
-              构建于:
-            </span>
-            <NuxtLink to="https://nuxt.com/" class="block bg-emerald-400 rounded px-1 py-0.5 text-white text-xs" target="_blank">
-              nuxt@{{ pkg.devDependencies.nuxt }}
-            </NuxtLink>
-          </div>
-        </div>
-        <div class="flex items-center gap-3">
-          <NuxtLink class="action-link" :to="pkg.repository.url" target="_blank" aria-label="项目 GitHub"><Icon name="ri:github-line" />GitHub</NuxtLink>
-        </div>
+  <section class="project-info" :style="{ borderColor: themeVars.borderColor }" aria-label="项目信息">
+    <div class="project-info-content">
+      <div class="project-info-row project-info-row-primary">
+        <a class="project-info-item project-info-item-link" :href="footer.githubUrl" target="_blank" rel="noopener noreferrer" aria-label="项目 GitHub">
+          <Icon name="ri:github-line" class="project-info-icon" />GitHub
+        </a>
+        <span class="project-info-item"><Icon name="ri:file-code-line" class="project-info-icon" /><span>版本: {{ footer.version }}</span></span>
+        <span class="project-info-item"><Icon name="ri:building-2-line" class="project-info-icon" /><span>构建于: {{ footer.buildText }}</span></span>
+      </div>
+      <div class="project-info-row project-info-row-secondary">
+        <a class="project-info-item project-info-item-link" :href="footer.authorUrl" target="_blank" rel="noopener noreferrer"><Icon name="ri:user-star-line" class="project-info-icon" />作者：{{ footer.authorName }}</a>
+        <a class="project-info-item project-info-item-link" :href="footer.originalAuthorUrl" target="_blank" rel="noopener noreferrer"><Icon name="ri:user-line" class="project-info-icon" />原作者：{{ footer.originalAuthorName }}</a>
       </div>
     </div>
-  </footer>
+  </section>
 </template>

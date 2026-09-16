@@ -8,6 +8,18 @@ const emit = defineEmits<{
 
 const { message: ms } = createDiscreteApi(['message'])
 const { signIn } = useAuth()
+const activeTab = ref('signin')
+const { data: registrationStatus } = await useFetch<{ enabled: boolean; expiresAt: string | null }>('/api/auth/registration-status')
+const now = useNow({ interval: 1000 })
+const registrationOpen = computed(() => Boolean(
+  registrationStatus.value?.enabled
+  && registrationStatus.value.expiresAt
+  && now.value.getTime() < Date.parse(registrationStatus.value.expiresAt),
+))
+watch(registrationOpen, (open) => {
+  if (!open)
+    activeTab.value = 'signin'
+})
 
 const loading = ref(false)
 
@@ -131,7 +143,7 @@ async function signUp() {
   try {
     loading.value = true
 
-    const { data } = await request('/api/auth/signUp', {
+    await request('/api/auth/signUp', {
       method: 'POST',
       body: {
         ...signUpModel.value,
@@ -139,6 +151,8 @@ async function signUp() {
     })
 
     ms.success('注册成功')
+    signInModel.value.email = signUpModel.value.email
+    activeTab.value = 'signin'
   }
   finally {
     loading.value = false
@@ -160,7 +174,7 @@ async function goToResetPassword() {
     </template>
     <NSpin :show="loading">
       <div class="flex flex-col gap-2 justify-center items-center mx-auto px-4 text-left relative">
-        <NTabs default-value="signin" size="large" justify-content="space-evenly">
+        <NTabs v-model:value="activeTab" size="large" justify-content="space-evenly">
           <NTabPane name="signin" tab="登录" display-directive="show">
             <NForm ref="signInFormRef" :model="signInModel" :show-label="false" :rules="signInRules">
               <NFormItem label="邮箱" path="email">
@@ -213,7 +227,7 @@ async function goToResetPassword() {
               </NButton>
             </div> -->
           </NTabPane>
-          <NTabPane name="signup" tab="注册" display-directive="show">
+          <NTabPane v-if="registrationOpen" name="signup" tab="注册" display-directive="show">
             <NForm ref="signUpFormRef" :model="signUpModel" :show-label="false" :rules="signUpRules">
               <NFormItem label="用户名" path="email">
                 <NInput v-model:value="signUpModel.email" placeholder="邮箱">

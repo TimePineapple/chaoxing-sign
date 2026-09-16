@@ -11,16 +11,6 @@ export default defineEventHandler(async (event) => {
 
   const body = await readBody<Body>(event)
 
-  // 判断该账号的某星账号是否大于 6 个，如果自行部署请注释下列代码
-  const count = await event.context.prisma.cxAccount.count({
-    where: {
-      userId: session!.uid,
-    },
-  })
-
-  if (count >= 6)
-    throw createError({ statusMessage: '该账户已登录账号达到最大限制' })
-
   let cx: Cx
   let result: string | null
   try {

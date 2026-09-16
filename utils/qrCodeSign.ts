@@ -9,6 +9,12 @@ export function createQrSignTraceId(): string {
   return `qr-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
 }
 
+export function formatQrCodeFeedbackTime(date = new Date()): string {
+  return [date.getHours(), date.getMinutes(), date.getSeconds()]
+    .map(value => String(value).padStart(2, '0'))
+    .join(':')
+}
+
 export type QrCodeSubmissionResult =
   | { status: 'accepted'; value: QrCodeSignLink }
   | { status: 'invalid' }

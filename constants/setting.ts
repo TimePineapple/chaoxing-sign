@@ -9,5 +9,5 @@ export const defaultSetting: Setting = {
   },
   monitor: false,
   signType: [...Object.keys(signTypeMap)],
-  delay: 2000,
+  delay: 200,
 }

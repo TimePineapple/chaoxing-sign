@@ -9,7 +9,7 @@ declare module 'h3' {
   }
 }
 
-const exclude = ['/api/cx/login', '/api/cx/accounts']
+const exclude = ['/api/cx/login', '/api/cx/accounts', '/api/cx/connectivity']
 
 export default eventHandler(async (event) => {
   const { context, node: { req } } = event

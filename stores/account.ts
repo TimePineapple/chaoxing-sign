@@ -40,25 +40,22 @@ export const useAccountStore = defineStore('account', () => {
   }
 
   async function login(form: LoginForm) {
-    try {
-      const { code, message, data } = await request('/api/cx/login', { method: 'POST', body: form })
-      if (code === 200) {
-        log(`${data?.info?.username} ${data?.info.realname} ${message}`, { type: 'success' })
-
-        accounts.value.push({
-          ...data,
-          courses: [],
-          selected: true,
-        } as unknown as Account)
-      }
-      else {
-        log(`${form.username} ${message}`, { type: 'error' })
-      }
-
-      return data
+    const { code, message, data } = await request('/api/cx/login', { method: 'POST', body: form })
+    if (code !== 200 || !data?.uid || !data?.info) {
+      const failureMessage = message || '添加学习通账号失败，请稍后重试'
+      log(`${form.username} ${failureMessage}`, { type: 'error' })
+      throw new Error(failureMessage)
     }
-    catch (error) {
-    }
+
+    log(`${data.info.username || form.username} ${data.info.realname} ${message}`, { type: 'success' })
+
+    accounts.value.push({
+      ...data,
+      courses: [],
+      selected: true,
+    } as unknown as Account)
+
+    return data
   }
 
   async function logout(uid: string) {

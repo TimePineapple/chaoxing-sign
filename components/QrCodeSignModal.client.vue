@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { useQRCode } from '@vueuse/integrations/useQRCode'
 import { QrcodeCapture, QrcodeDropZone, QrcodeStream } from 'vue-qrcode-reader'
-import { createQrCodeSubmissionGuard } from '~/utils/qrCodeSign'
+import { createQrCodeSubmissionGuard, parseQrCodeSignLink } from '~/utils/qrCodeSign'
 
 export interface DetectedBarcode {
   boundingBox: BoundingBox
@@ -27,12 +27,15 @@ export interface BoundingBox {
 const props = withDefaults(defineProps<{
   title?: string
   loading?: boolean
+  retryFailedAvailable?: boolean
 }>(), {
   loading: false,
+  retryFailedAvailable: false,
 })
 
 const emit = defineEmits<{
   (e: 'success', text: string): void
+  (e: 'retry-failed'): void
 }>()
 
 const ms = useMessage()
@@ -42,8 +45,10 @@ const cameraReady = ref(false)
 const scanLocked = ref(false)
 const errorMessage = ref('')
 const lastInvalidCode = ref('')
+const pendingDetectedLink = ref<string | null>(null)
 const captureContainer = ref<HTMLElement>()
 const submissionGuard = createQrCodeSubmissionGuard()
+let pendingDetectedTimer: ReturnType<typeof setTimeout> | undefined
 
 const qrcode = useQRCode(text, {
   errorCorrectionLevel: 'H',
@@ -69,7 +74,15 @@ const scanStatus = computed(() => {
   return '摄像头已停止'
 })
 
-function submitQrCode(value: string) {
+function clearPendingDetectedLink() {
+  if (pendingDetectedTimer !== undefined) {
+    clearTimeout(pendingDetectedTimer)
+    pendingDetectedTimer = undefined
+  }
+  pendingDetectedLink.value = null
+}
+
+function acceptQrCode(value: string) {
   const link = value.trim()
 
   if (props.loading)
@@ -95,6 +108,46 @@ function submitQrCode(value: string) {
   emit('success', result.value.link)
 }
 
+function submitQrCode(value: string, waitForSecond = false) {
+  const link = value.trim()
+
+  if (props.loading)
+    return
+
+  if (waitForSecond) {
+    const parsed = parseQrCodeSignLink(link)
+    if (!parsed) {
+      if (link && link !== lastInvalidCode.value) {
+        lastInvalidCode.value = link
+        ms.error('未识别到有效的签到链接，请重试')
+      }
+      return
+    }
+
+    lastInvalidCode.value = ''
+    if (!pendingDetectedLink.value) {
+      pendingDetectedLink.value = parsed.link
+      pendingDetectedTimer = setTimeout(() => {
+        const firstLink = pendingDetectedLink.value
+        clearPendingDetectedLink()
+        if (firstLink)
+          acceptQrCode(firstLink)
+      }, 12_000)
+      return
+    }
+
+    if (parsed.link === pendingDetectedLink.value)
+      return
+
+    clearPendingDetectedLink()
+  }
+  else {
+    clearPendingDetectedLink()
+  }
+
+  acceptQrCode(link)
+}
+
 function handleScan() {
   if (props.loading)
     return
@@ -105,9 +158,13 @@ function handleScan() {
     return
   }
 
+  if (props.retryFailedAvailable)
+    emit('retry-failed')
+
   text.value = ''
   errorMessage.value = ''
   lastInvalidCode.value = ''
+  clearPendingDetectedLink()
   submissionGuard.reset()
   scanLocked.value = false
   cameraReady.value = false
@@ -141,13 +198,14 @@ function onDetect(detectedCodes: DetectedBarcode[]) {
   const rawValue = detectedCodes.find(code => code.rawValue.trim())?.rawValue
 
   if (rawValue)
-    submitQrCode(rawValue)
+    submitQrCode(rawValue, true)
 }
 
 function handleOpen() {
   text.value = ''
   errorMessage.value = ''
   lastInvalidCode.value = ''
+  clearPendingDetectedLink()
   submissionGuard.reset()
   scanLocked.value = false
   cameraReady.value = false
@@ -155,6 +213,7 @@ function handleOpen() {
 }
 
 function handleClose() {
+  clearPendingDetectedLink()
   showScan.value = false
   cameraReady.value = false
   scanLocked.value = false
@@ -170,6 +229,7 @@ function handleUpload() {
   showScan.value = false
   cameraReady.value = false
   scanLocked.value = false
+  clearPendingDetectedLink()
   submissionGuard.reset()
 
   const fileInput = captureContainer.value?.querySelector<HTMLInputElement>('input[type="file"]')
@@ -194,9 +254,17 @@ function handleUpload() {
     @after-leave="handleClose"
   >
     <n-space class="mb-2">
-      <n-button type="info" :disabled="loading" @click="handleScan">
-        {{ showScan ? '关闭摄像头' : '重新扫描' }}
-      </n-button>
+      <div class="scan-action">
+        <n-button type="info" :disabled="loading" @click="handleScan">
+          {{ showScan ? '关闭摄像头' : '重新扫描' }}
+        </n-button>
+        <span
+          v-if="retryFailedAvailable && !showScan"
+          class="retry-failed-hint"
+        >
+          重新扫描将自动选取失败账号
+        </span>
+      </div>
       <n-button :disabled="loading" @click="handleUpload">
         选择图片
       </n-button>
@@ -260,5 +328,17 @@ function handleUpload() {
 .scan-status {
   display: block;
   margin-bottom: 10px;
+}
+
+.scan-action {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.retry-failed-hint {
+  margin: 2px 0 0;
+  font-size: 12px;
+  line-height: 1.4;
 }
 </style>
