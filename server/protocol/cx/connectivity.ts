@@ -2,6 +2,7 @@ import type { Response } from 'got'
 import { RequestError } from 'got'
 import got from 'got'
 import { CxProxyError, getCxProxyOptions } from './proxy'
+import { cxRequestStartQueue } from '~/server/utils/cxRequestStartQueue'
 
 export const CX_LOGIN_PAGE_URL = 'https://passport2.chaoxing.com/login'
 
@@ -45,8 +46,13 @@ export function cxConnectivityErrorMessage(error: unknown) {
 
 export async function checkCxConnectivity(target = CX_LOGIN_PAGE_URL): Promise<CxConnectivityResult> {
   try {
+    const proxyOptions = getCxProxyOptions()
     const response = await got.get(target, {
-      ...getCxProxyOptions(),
+      ...proxyOptions,
+      hooks: {
+        ...proxyOptions.hooks,
+        beforeRequest: [options => cxRequestStartQueue.waitTurn(options.signal)],
+      },
       responseType: 'text',
       timeout: { request: 10_000 },
       retry: { limit: 0 },

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { pick } from 'lodash'
 import type { Account } from '~/types/account'
+import { connectRecentSignEvents } from '~/utils/recentSignEvents.client'
 
 const accountStore = useAccountStore()
 
@@ -15,14 +16,46 @@ async function handleSync() {
   await accountStore.syncAccounts().finally(() => {
     isSyncing.value = false
   })
+  void refreshRecentSignsQuietly(true)
+}
+
+let lastRecentSignRefresh = 0
+async function refreshRecentSignsQuietly(force = false) {
+  if (!force && Date.now() - lastRecentSignRefresh < 1000)
+    return
+  lastRecentSignRefresh = Date.now()
+  try {
+    await accountStore.refreshRecentSigns()
+  }
+  catch {
+    // A display-only refresh must not interrupt account actions.
+  }
+}
+
+function refreshWhenVisible() {
+  if (document.visibilityState === 'visible')
+    void refreshRecentSignsQuietly()
 }
 
 async function selectAccount(account: Account) {
   account.selected = !account.selected
 }
 
+let closeRecentSignEvents: (() => void) | undefined
 tryOnMounted(() => {
-  accountStore.syncAccounts()
+  void accountStore.syncAccounts()
+  void refreshRecentSignsQuietly()
+  closeRecentSignEvents = connectRecentSignEvents(
+    event => accountStore.applyRecentSign(event),
+    refreshWhenVisible,
+  )
+  document.addEventListener('visibilitychange', refreshWhenVisible)
+  window.addEventListener('focus', refreshWhenVisible)
+})
+onBeforeUnmount(() => {
+  closeRecentSignEvents?.()
+  document.removeEventListener('visibilitychange', refreshWhenVisible)
+  window.removeEventListener('focus', refreshWhenVisible)
 })
 </script>
 
@@ -60,7 +93,7 @@ tryOnMounted(() => {
       </template>
       <template v-if=" accountStore.accounts?.length! > 0">
         <div class="account-stack">
-          <AccountItem v-for="account in accountStore.accounts" v-bind="pick(account, ['uid', 'info', 'lastLoginTime', 'selected', 'setting'])" :key="account.uid" @click="selectAccount(account)" />
+          <AccountItem v-for="account in accountStore.accounts" v-bind="pick(account, ['uid', 'info', 'lastLoginTime', 'selected', 'setting'])" :key="account.uid" :recent-sign="accountStore.recentSigns[account.uid]" @click="selectAccount(account)" />
           <n-button class="add-account-button" block dashed @click="showLoginModal = true">
             <template #icon><Icon name="ic:outline-add-box" /></template>
             添加账号

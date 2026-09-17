@@ -1,3 +1,6 @@
+import { SignMode } from '~/constants/cx'
+import { createSignLog } from '~/server/utils/createSignLog'
+
 interface Body {
   course: Course
   uid: string
@@ -9,17 +12,18 @@ export default defineEventHandler(async (event) => {
   const data = await event.context.cx.signByCourse(course)
 
   if (data.length > 0) {
-    await event.context.prisma.signLog.createMany({
-      data: data.map(item => ({
-        id: `${item.activity.id}_${event.context.cx.user.uid}`,
+    for (const item of data) {
+      await createSignLog(event.context.cx, event.context.prisma, {
         activityId: String(item.activity.id),
-        isSigned: item.result === '签到成功',
+        activityName: item.activity.name,
+        courseName: course.name,
+        courseId: course.courseId,
+        classId: course.classId,
+        type: Number(item.activity.otherId),
+        mode: SignMode.Manual,
         result: item.result,
-        time: new Date(),
-        accountId: event.context.cx.user.uid,
-      })),
-      skipDuplicates: true,
-    })
+      })
+    }
   }
 
   return ResOp.success(data)

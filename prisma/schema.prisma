@@ -47,10 +47,13 @@ model SignLog {
   id           String    @id @default(cuid())
   activityName String
   activityId   String
+  courseName   String?
   type         Int
   mode         Int       // 1 手动签到 2 自动签到
   result       String
   time         DateTime
   accounts     CxAccount @relation(fields: [accountId], references: [uid], onDelete: Cascade)
   accountId    String
+
+  @@index([accountId, result, time])
 }

@@ -1,6 +1,7 @@
 import type { PrismaClient } from '@prisma/client'
 import { ActivityStatusEnum, ActivityTypeEnum, SignMode } from '~/constants/cx'
 import type { Cx } from '~/server/protocol/cx'
+import { createSignLog } from '~/server/utils/createSignLog'
 
 export interface QrSignInput {
   uid: string
@@ -98,12 +99,10 @@ export async function executeQrSign(
     stage = '保存签到记录（签到请求已发送，请先核对签到状态）'
     trace('sign log save start', { success: result === '签到成功' })
     signal.throwIfAborted()
-    await prisma.signLog.create({
-      data: {
-        activityId: String(activity.id), activityName: activity.name,
-        type: activity.otherId, mode: SignMode.Manual, result, time: new Date(),
-        accountId: cx.user.uid,
-      },
+    await createSignLog(cx, prisma, {
+      activityId: String(activity.id), activityName: activity.name,
+      courseId: resolvedCourseId, classId,
+      type: activity.otherId, mode: SignMode.Manual, result,
     })
     trace('request complete', { success: result === '签到成功' })
     return { result, activityName: activity.name }

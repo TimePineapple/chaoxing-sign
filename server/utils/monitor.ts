@@ -3,6 +3,7 @@ import type { CxAccount } from '@prisma/client'
 import type { EasemobChat } from 'easemob-websdk'
 import { ActivityTypeEnum, SignMode } from '~/constants/cx'
 import { Cx } from '~~/server/protocol/cx'
+import { createSignLog } from '~/server/utils/createSignLog'
 
 import { IMConnectionMap, createIMConnection } from '~~/server/protocol/easemob'
 
@@ -30,16 +31,10 @@ export async function handleMessage(message: EasemobChat.TextMsgBody, cx: Cx) {
 
     console.log(`课程: ${course.name} 活动: ${activity.name} 签到结果: ${result}`)
 
-    await prisma.signLog.create({
-      data: {
-        activityId: String(activity.id),
-        activityName: activity.name,
-        type: activity.otherId,
-        result,
-        time: new Date(),
-        mode: SignMode.Auto,
-        accountId: cx.user.uid,
-      },
+    await createSignLog(cx, prisma, {
+      activityId: String(activity.id), activityName: activity.name,
+      courseId: course.courseId, classId: course.classId, courseName: course.name,
+      type: activity.otherId, result, mode: SignMode.Auto,
     })
   }
 }

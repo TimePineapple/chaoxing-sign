@@ -4,6 +4,7 @@ import { SignTypeEnum } from '~/constants/cx'
 import { formatQrCodeFeedbackTime, qrCodeRequestError } from '~/utils/qrCodeSign'
 import { connectQrSignEvents } from '~/utils/qrSignEvents.client'
 import type { QrJobView, QrStreamSnapshot, QrSubmitDecision } from '~/utils/qrSignProtocol'
+import type { RecentSign } from '~/types/recentSign'
 
 const props = defineProps<{
   uid: string
@@ -12,6 +13,7 @@ const props = defineProps<{
   setting: CX.Setting
   selected?: boolean
   lastLoginTime: string
+  recentSign?: RecentSign
 }>()
 
 const emit = defineEmits<{ (e: 'click'): void }>()
@@ -35,6 +37,24 @@ const showCodeOrGestureModal = ref(false)
 
 const showSettingModal = ref(false)
 const showSignHistory = ref(false)
+
+const now = ref(Date.now())
+let recentSignExpiry: ReturnType<typeof setTimeout> | undefined
+watch(() => props.recentSign?.time, (time) => {
+  now.value = Date.now()
+  if (recentSignExpiry)
+    clearTimeout(recentSignExpiry)
+  const expiresAt = Date.parse(time || '') + 30 * 60 * 1000
+  if (Number.isFinite(expiresAt) && expiresAt > now.value)
+    recentSignExpiry = setTimeout(() => { now.value = Date.now() }, expiresAt - now.value)
+}, { immediate: true })
+const visibleRecentSign = computed(() => {
+  const sign = props.recentSign
+  const time = Date.parse(sign?.time || '')
+  return sign && Number.isFinite(time) && time <= now.value && now.value < time + 30 * 60 * 1000
+    ? sign
+    : null
+})
 
 // 正在执行中的活动
 const doingActivity = ref<CX.ActivityItem | null>(null)
@@ -94,7 +114,11 @@ watch(showQrCodeModal, (show) => {
     )
   }
 })
-onBeforeUnmount(() => closeQrEvents?.())
+onBeforeUnmount(() => {
+  closeQrEvents?.()
+  if (recentSignExpiry)
+    clearTimeout(recentSignExpiry)
+})
 
 function applyQrDecision(decision: QrSubmitDecision, url: string, requestedActivityId: string) {
   const current = qrCodeResult.value
@@ -185,6 +209,9 @@ async function handleCodeOrGestureSignSuccess(result: string) {
       <div class="account-meta">
         <p>
           最近登录时间: {{ useDateFormat(lastLoginTime, 'YYYY-MM-DD HH:mm:ss').value }}
+        </p>
+        <p v-if="visibleRecentSign" class="account-recent-sign">
+          最近签到：{{ visibleRecentSign.name }} {{ useDateFormat(visibleRecentSign.time, 'HH:mm:ss').value }}
         </p>
       </div>
 

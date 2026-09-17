@@ -1,4 +1,5 @@
 import { SignMode } from '~/constants/cx'
+import { createSignLog } from '~/server/utils/createSignLog'
 
 interface Body {
   uid: string
@@ -13,16 +14,12 @@ export default defineEventHandler(async (event) => {
   for (const data of signResults) {
     const { activity, result } = data
 
-    await event.context.prisma.signLog.create({
-      data: {
-        activityId: String(activity.id),
-        activityName: activity.name,
-        type: Number(activity.otherId),
-        result,
-        time: new Date(),
-        mode: SignMode.Manual,
-        accountId: event.context.cx.user.uid,
-      },
+    await createSignLog(event.context.cx, event.context.prisma, {
+      activityId: String(activity.id), activityName: activity.name,
+      courseId: activity.course?.courseId || activity.courseId,
+      classId: activity.course?.classId || activity.clazzId,
+      courseName: activity.course?.name,
+      type: Number(activity.otherId), result, mode: SignMode.Manual,
     })
   }
 

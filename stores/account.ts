@@ -3,11 +3,16 @@ import { createDiscreteApi } from 'naive-ui'
 import { signTypeMap } from '~/constants/cx'
 import type { Body as LoginForm } from '~/server/api/cx/login.post'
 import type { Account, Activity, Course, Setting } from '~/types/account'
+import type { RecentSign, RecentSignEvent } from '~/types/recentSign'
 import { createQrSignTraceId, parseQrCodeSignLink } from '~/utils/qrCodeSign'
 import type { QrSubmitDecision } from '~/utils/qrSignProtocol'
 
 export const useAccountStore = defineStore('account', () => {
   const accounts = ref<Account[]>([])
+  const recentSigns = ref<Record<string, RecentSign>>({})
+  let recentSignRequestId = 0
+  let pushGeneration = 0
+  const pushedAtGeneration = new Map<string, number>()
 
   const selectAccounts = computed(() => accounts.value.filter(a => a.selected === true))
 
@@ -40,6 +45,28 @@ export const useAccountStore = defineStore('account', () => {
     log('同步成功', { type: 'success' })
   }
 
+  async function refreshRecentSigns() {
+    const requestId = ++recentSignRequestId
+    const generation = pushGeneration
+    const { data } = await request('/api/cx/recent-signs')
+    if (requestId === recentSignRequestId) {
+      const next = (data || {}) as Record<string, RecentSign>
+      for (const [uid, pushedAt] of pushedAtGeneration) {
+        if (pushedAt > generation && recentSigns.value[uid])
+          next[uid] = recentSigns.value[uid]
+      }
+      recentSigns.value = next
+    }
+  }
+
+  function applyRecentSign(event: RecentSignEvent) {
+    const previous = recentSigns.value[event.uid]
+    if (previous && Date.parse(previous.time) > Date.parse(event.sign.time))
+      return
+    pushedAtGeneration.set(event.uid, ++pushGeneration)
+    recentSigns.value = { ...recentSigns.value, [event.uid]: event.sign }
+  }
+
   async function login(form: LoginForm) {
     const { code, message, data } = await request('/api/cx/login', { method: 'POST', body: form })
     if (code !== 200 || !data?.uid || !data?.info) {
@@ -65,6 +92,8 @@ export const useAccountStore = defineStore('account', () => {
     await request('/api/cx/logout', { method: 'POST', body: { uid } })
 
     accounts.value = accounts.value.filter(a => a.uid !== uid)
+    delete recentSigns.value[uid]
+    pushedAtGeneration.delete(uid)
 
     log(`${account.info.realname} 退出成功`, { type: 'success' })
   }
@@ -294,11 +323,14 @@ export const useAccountStore = defineStore('account', () => {
 
   return {
     accounts: skipHydrate(accounts),
+    recentSigns: skipHydrate(recentSigns),
     selectAccounts,
     loading,
     login,
     logout,
     syncAccounts,
+    refreshRecentSigns,
+    applyRecentSign,
     getAccount,
     setAccount,
     getCourses,

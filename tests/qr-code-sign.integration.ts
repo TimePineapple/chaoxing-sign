@@ -17,9 +17,12 @@ function fixture(uid: string, ownerId = 'web-a') {
     signQrCode: vi.fn().mockResolvedValue('签到成功'),
   }
   const prisma = {
-    cxAccount: { findFirst: vi.fn().mockImplementation(({ where }) => Promise.resolve(where.userId === ownerId ? { uid } : null)) },
+    cxAccount: {
+      findFirst: vi.fn().mockImplementation(({ where }) => Promise.resolve(where.userId === ownerId ? { uid } : null)),
+      findUnique: vi.fn().mockResolvedValue({ userId: ownerId }),
+    },
     course: { findFirst: vi.fn().mockResolvedValue(null) },
-    signLog: { create: vi.fn().mockResolvedValue({}) },
+    signLog: { create: vi.fn().mockResolvedValue({ id: 'saved-sign-log' }), update: vi.fn().mockResolvedValue({}) },
   }
   const event = {
     session: { uid: ownerId },
@@ -53,6 +56,7 @@ afterEach(() => {
 describe('QR submission endpoint', () => {
   it('acknowledges immediately and publishes the eventual result with one upstream submission and log', async () => {
     const { cx, prisma, event } = fixture('cx-a')
+    cx.getCourseList.mockResolvedValue([{ name: '示例课程', courseId: 'course-1', classId: '300' }])
     const received: string[] = []
     queue.subscribe('web-a', job => received.push(job.state))
     const response = await handler(event)
@@ -62,6 +66,10 @@ describe('QR submission endpoint', () => {
     expect(received).toEqual(['queued', 'running', 'success'])
     expect(cx.signQrCode).toHaveBeenCalledTimes(1)
     expect(prisma.signLog.create).toHaveBeenCalledTimes(1)
+    await vi.waitFor(() => expect(prisma.signLog.update).toHaveBeenCalledWith({
+      where: { id: 'saved-sign-log' }, data: { courseName: '示例课程' },
+    }))
+    expect(cx.getCourseList).toHaveBeenCalledTimes(1)
     expect(queue.replay('web-a', 0).at(-1)).toMatchObject({ state: 'success', result: '签到成功' })
   })
 

@@ -6,6 +6,7 @@ import { CookieJar } from 'tough-cookie'
 import * as cheerio from 'cheerio'
 import got from 'got'
 import { CxProxyError, getCxProxyOptions } from './proxy'
+import { cxRequestStartQueue } from '~/server/utils/cxRequestStartQueue'
 
 export enum ActivityTypeEnum {
   Sign = 2, // 签到
@@ -74,6 +75,7 @@ export class Cx {
       cookieJar: this.cookieJar,
       hooks: {
         ...proxyOptions.hooks,
+        beforeRequest: [options => cxRequestStartQueue.waitTurn(options.signal)],
         afterResponse: [
           (response) => {
             this.currentUrl = response.url

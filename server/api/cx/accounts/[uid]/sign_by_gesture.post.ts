@@ -1,4 +1,5 @@
 import { ActivityStatusEnum, ActivityTypeEnum, SignMode } from '~/constants/cx'
+import { createSignLog } from '~/server/utils/createSignLog'
 
 interface Body {
   uid: string
@@ -36,16 +37,10 @@ export default defineEventHandler(async (event) => {
   else
     result = await event.context.cx.signGesture(activity, signCode)
 
-  await event.context.prisma.signLog.create({
-    data: {
-      activityId: String(activity.id),
-      activityName: activity.name,
-      type: activity.otherId,
-      mode: SignMode.Manual,
-      result,
-      time: new Date(),
-      accountId: event.context.cx.user.uid,
-    },
+  await createSignLog(event.context.cx, event.context.prisma, {
+    activityId: String(activity.id), activityName: activity.name,
+    courseId: activity.courseId || courseId, classId: activity.clazzId,
+    type: activity.otherId, mode: SignMode.Manual, result,
   })
 
   return ResOp.success({
