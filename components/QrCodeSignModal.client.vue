@@ -144,6 +144,13 @@ async function refreshRearCameras(requestId: number) {
     if (settings?.facingMode === 'environment' && settings.deviceId && !cameras.some(camera => camera.deviceId === settings.deviceId))
       cameras.unshift({ deviceId: settings.deviceId, label: '' })
 
+    // Keep the detected order, but make the last rear camera the second switch target.
+    if (cameras.length > 2) {
+      const [lastCamera] = cameras.splice(-1, 1)
+      if (lastCamera)
+        cameras.splice(1, 0, lastCamera)
+    }
+
     rearCameras.value = cameras
     activeCameraId.value = settings?.deviceId
       || cameras.find(camera => camera.label && camera.label === track?.label)?.deviceId

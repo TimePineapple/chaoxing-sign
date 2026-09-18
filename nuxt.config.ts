@@ -1,7 +1,8 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
-const footerConfig = JSON.parse(readFileSync(resolve(process.cwd(), 'public/footer-config.json'), 'utf8'))
+const packageConfig = JSON.parse(readFileSync(resolve(process.cwd(), 'package.json'), 'utf8'))
+const footerConfig = { ...packageConfig.footerConfig, version: packageConfig.version }
 
 export default defineNuxtConfig({
   app: {

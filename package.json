@@ -1,6 +1,14 @@
 {
   "name": "chaoxing-sign",
-  "version": "0.5.2",
+  "version": "1.4.3",
+  "footerConfig": {
+    "githubUrl": "https://github.com/TimePineapple/chaoxing-sign",
+    "buildText": "nuxt@3.14.1592",
+    "authorName": "TimePineapple",
+    "originalAuthorName": "Kuizuo",
+    "authorUrl": "https://github.com/TimePineapple",
+    "originalAuthorUrl": "https://kuizuo.cn"
+  },
   "private": true,
   "packageManager": "pnpm@9.15.9",
   "author": {

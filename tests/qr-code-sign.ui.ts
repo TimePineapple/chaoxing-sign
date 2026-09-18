@@ -123,7 +123,7 @@ it('shows batch failures inside the real modal after a video detection event', a
   expect(document.querySelector('[data-testid="camera-frame"]')?.getAttribute('data-facing-mode')).toBe('environment')
   const switchButton = () => buttons().find(button => button.textContent?.includes('后置镜头切换'))
   await vi.waitFor(() => expect(switchButton()?.disabled).toBe(false))
-  for (const deviceId of ['rear-wide', 'rear-tele', 'rear-main']) {
+  for (const deviceId of ['rear-tele', 'rear-wide', 'rear-main']) {
     switchButton()!.click()
     await vi.waitFor(() => expect(document.querySelector('[data-testid="camera-frame"]')?.getAttribute('data-device-id')).toBe(deviceId))
     await vi.waitFor(() => expect(switchButton()?.disabled).toBe(false))
