@@ -15,7 +15,7 @@ describe('server-wide QR queue', () => {
   })
   afterEach(() => vi.useRealTimers())
 
-  it('claims a UID while queued and starts unrelated jobs 200ms apart without awaiting results', async () => {
+  it('claims a UID while queued and starts unrelated jobs 150ms apart without awaiting results', async () => {
     const queue = new QrSignQueue()
     const first = deferred<{ result: string }>()
     const second = deferred<{ result: string }>()
@@ -36,10 +36,10 @@ describe('server-wide QR queue', () => {
     expect(duplicate).not.toHaveBeenCalled()
     await vi.advanceTimersByTimeAsync(0)
     expect(starts).toHaveLength(1)
-    await vi.advanceTimersByTimeAsync(199)
+    await vi.advanceTimersByTimeAsync(149)
     expect(starts).toHaveLength(1)
     await vi.advanceTimersByTimeAsync(1)
-    expect(starts[1] - starts[0]).toBe(200)
+    expect(starts[1] - starts[0]).toBe(150)
     expect(queue.snapshot('web-a').active).toHaveLength(1)
     expect(queue.snapshot('web-b').active).toHaveLength(1)
     first.resolve({ result: '签到成功' })
@@ -68,7 +68,7 @@ describe('server-wide QR queue', () => {
     expect(again).toMatchObject({ state: 'accepted' })
     expect(again.job.id).not.toBe(accepted.job.id)
     expect(run).toHaveBeenCalledTimes(1)
-    await vi.advanceTimersByTimeAsync(200)
+    await vi.advanceTimersByTimeAsync(150)
     expect(run).toHaveBeenCalledTimes(2)
   })
 
@@ -80,8 +80,60 @@ describe('server-wide QR queue', () => {
     const again = queue.submit({ ownerId: 'web-a', uid: 'cx-a', activityId: '10', run })
     expect(again.state).toBe('accepted')
     expect(run).toHaveBeenCalledTimes(1)
-    await vi.advanceTimersByTimeAsync(200)
+    await vi.advanceTimersByTimeAsync(150)
     expect(run).toHaveBeenCalledTimes(2)
+  })
+
+  it('shares active jobs and recent successes only with their owner, then expires success after one minute', async () => {
+    const queue = new QrSignQueue()
+    const pending = deferred<{ result: string; courseName: string }>()
+    const decision = queue.submit({ ownerId: 'web-a', uid: 'cx-a', activityId: '10', clientId: 'client-a',
+      run: () => pending.promise })
+    expect(queue.snapshot('web-a').active).toMatchObject([{
+      id: decision.job.id, clientId: 'client-a', state: 'queued', submittedAt: Date.now(),
+    }])
+    expect(queue.snapshot('web-b')).toEqual({ active: [], recentSuccess: [] })
+
+    await vi.advanceTimersByTimeAsync(0)
+    pending.resolve({ result: '签到成功', courseName: '高等数学' })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(queue.snapshot('web-a').recentSuccess).toMatchObject([{
+      id: decision.job.id, state: 'success', clientId: 'client-a',
+      completedAt: Date.now(), courseName: '高等数学',
+    }])
+    expect(queue.snapshot('web-b').recentSuccess).toEqual([])
+    await vi.advanceTimersByTimeAsync(59_999)
+    expect(queue.snapshot('web-a').recentSuccess).toHaveLength(1)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(queue.snapshot('web-a').recentSuccess).toEqual([])
+  })
+
+  it('publishes a resolved course name after success without extending the one-minute window', async () => {
+    const queue = new QrSignQueue()
+    let reportCourseName!: (name: string) => void
+    const events: string[] = []
+    queue.subscribe('web-a', event => events.push(`${event.state}:${event.courseName || ''}`))
+    queue.submit({ ownerId: 'web-a', uid: 'cx-a', activityId: '10', run: async (_signal, report) => {
+      reportCourseName = report
+      return { result: '签到成功' }
+    } })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(queue.snapshot('web-a').recentSuccess[0].courseName).toBeUndefined()
+    await vi.advanceTimersByTimeAsync(30_000)
+    reportCourseName('实时课程名')
+    expect(events.at(-1)).toBe('success:实时课程名')
+    expect(queue.snapshot('web-a').recentSuccess[0].courseName).toBe('实时课程名')
+    await vi.advanceTimersByTimeAsync(30_000)
+    expect(queue.snapshot('web-a').recentSuccess).toEqual([])
+    reportCourseName('过期更新')
+    expect(events.at(-1)).toBe('success:实时课程名')
+  })
+
+  it('does not restore failed jobs in a newly opened modal', async () => {
+    const queue = new QrSignQueue()
+    queue.submit({ ownerId: 'web-a', uid: 'cx-a', activityId: '10', run: async () => ({ result: '签到已过期' }) })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(queue.snapshot('web-a')).toEqual({ active: [], recentSuccess: [] })
   })
 
   it('does not include links or QR tokens in client events', async () => {
@@ -91,6 +143,7 @@ describe('server-wide QR queue', () => {
     queue.submit({ ownerId: 'web-a', uid: 'cx-a', activityId: '10', run: async () => ({
       result: '失败 https://example.test/sign?id=10&enc=PRIVATE cookie=PRIVATE password=PRIVATE',
       activityName: 'https://example.test/private',
+      courseName: 'https://example.test/course',
     }) })
     await vi.advanceTimersByTimeAsync(0)
     expect(received.join(' ')).not.toContain('example.test')
@@ -99,7 +152,7 @@ describe('server-wide QR queue', () => {
   })
 
   it('times out 45 seconds after execution starts, aborts, publishes uncertainty and releases UID', async () => {
-    const queue = new QrSignQueue(200, 45_000)
+    const queue = new QrSignQueue(150, 45_000)
     const signals: AbortSignal[] = []
     const run = vi.fn((signal: AbortSignal) => {
       signals.push(signal)

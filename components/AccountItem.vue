@@ -4,6 +4,9 @@ import { SignTypeEnum } from '~/constants/cx'
 import { formatQrCodeFeedbackTime, qrCodeRequestError } from '~/utils/qrCodeSign'
 import { connectQrSignEvents } from '~/utils/qrSignEvents.client'
 import { getClientLocationForQr } from '~/utils/clientLocation.client'
+import { isOtherQrSignClient } from '~/utils/qrSignClient.client'
+import { qrJobFeedbackMessage, qrJobFeedbackTime } from '~/utils/qrSignFeedback'
+import { useQrSignOverlay } from '~/utils/useQrSignOverlay.client'
 import type { QrJobView, QrStreamSnapshot, QrSubmitDecision } from '~/utils/qrSignProtocol'
 import type { RecentSign } from '~/types/recentSign'
 
@@ -34,6 +37,7 @@ interface QrFeedback {
 }
 const qrCodeResult = ref<QrFeedback | null>(null)
 const showQrCodeModal = ref(false)
+const { mode: qrOverlayMode, applyJob: applyOverlayJob, applySnapshot: applyOverlaySnapshot, reset: resetOverlay } = useQrSignOverlay(computed(() => [props.uid]))
 const showCodeOrGestureModal = ref(false)
 
 const showSettingModal = ref(false)
@@ -71,31 +75,48 @@ function applyQrJob(job: QrJobView) {
   const current = previous?.jobId && previous.jobId !== job.id ? null : previous
   const differentActivity = Boolean(current?.requestedActivityId && current.requestedActivityId !== job.activityId)
   const final = job.state === 'success' || job.state === 'error'
+  const otherClient = isOtherQrSignClient(job.clientId)
   qrCodeResult.value = {
     ...current,
-    time: current?.time || formatQrCodeFeedbackTime(),
+    time: qrJobFeedbackTime(job),
     status: job.state === 'success' && !differentActivity ? 'success' : final ? 'error' : 'pending',
     jobId: job.id,
     activityId: job.activityId,
     message: differentActivity
       ? `先提交的活动 ${job.activityId}：${job.message}。你提交的活动 ${current?.requestedActivityId} 尚未执行，请手动重新提交。`
-      : job.message,
+      : qrJobFeedbackMessage(job, otherClient),
   }
 }
 
 function handleQrSnapshot(snapshot: QrStreamSnapshot) {
   const current = qrCodeResult.value
-  if (current?.jobId) {
+  if (current?.jobId && current.status === 'pending') {
     const job = snapshot.active.find(item => item.id === current.jobId)
+      || snapshot.recentSuccess.find(item => item.id === current.jobId)
     if (job)
       applyQrJob(job)
-    else if (current.status === 'pending')
+    else
       qrCodeResult.value = { ...current, status: 'error', message: '服务端没有找到原任务，结果未确认；请先核对签到历史，再决定是否重试' }
     return
   }
   const active = snapshot.active.find(item => item.uid === props.uid)
-  if (active)
+  if (active) {
     applyQrJob(active)
+    return
+  }
+  if (current?.jobId) {
+    const job = snapshot.recentSuccess.find(item => item.id === current.jobId)
+    if (job)
+      applyQrJob(job)
+    return
+  }
+  if (current)
+    return
+  const recent = snapshot.recentSuccess
+    .filter(item => item.uid === props.uid && isOtherQrSignClient(item.clientId))
+    .sort((a, b) => (b.completedAt || 0) - (a.completedAt || 0))[0]
+  if (recent)
+    applyQrJob(recent)
 }
 
 watch(showQrCodeModal, (show) => {
@@ -106,13 +127,26 @@ watch(showQrCodeModal, (show) => {
   if (show) {
     qrCodeResult.value = null
     closeQrEvents = connectQrSignEvents(
-      job => applyQrJob(job),
-      handleQrSnapshot,
+      (job) => {
+        if (!showQrCodeModal.value)
+          return
+        applyOverlayJob(job)
+        applyQrJob(job)
+      },
+      (snapshot) => {
+        if (!showQrCodeModal.value)
+          return
+        applyOverlaySnapshot(snapshot)
+        handleQrSnapshot(snapshot)
+      },
       () => {
         if (qrCodeResult.value?.status === 'pending')
           qrCodeResult.value.message = '结果连接中断，正在重连；请先核对签到历史，不要重复提交'
       },
     )
+  }
+  else {
+    resetOverlay()
   }
 })
 onBeforeUnmount(() => {
@@ -125,12 +159,13 @@ function applyQrDecision(decision: QrSubmitDecision, url: string, requestedActiv
   const current = qrCodeResult.value
   if (current?.jobId === decision.job.id && current.status !== 'pending')
     return
+  applyOverlayJob(decision.job)
   qrCodeResult.value = {
-    time: formatQrCodeFeedbackTime(),
+    time: qrJobFeedbackTime(decision.job),
     status: 'pending',
     message: decision.state === 'busy' && requestedActivityId !== decision.job.activityId
       ? `活动 ${decision.job.activityId} 正在处理；你提交的活动 ${requestedActivityId} 未执行。待其结束后请手动重新提交。`
-      : decision.job.message,
+      : qrJobFeedbackMessage(decision.job, isOtherQrSignClient(decision.job.clientId)),
     jobId: decision.job.id,
     activityId: decision.job.activityId,
     requestedActivityId,
@@ -144,7 +179,13 @@ async function handleQrCodeSignSuccess(result: string) {
 
   const requestedActivityId = new URL(result).searchParams.get('id') || ''
   const generation = qrModalGeneration
-  qrCodeResult.value = { time: formatQrCodeFeedbackTime(), status: 'pending', message: '正在提交任务', requestedActivityId, retryUrl: result }
+  if (qrCodeResult.value?.jobId && qrCodeResult.value.status === 'pending') {
+    qrCodeResult.value.requestedActivityId = requestedActivityId
+    qrCodeResult.value.retryUrl = result
+  }
+  else {
+    qrCodeResult.value = { time: formatQrCodeFeedbackTime(), status: 'pending', message: '正在提交任务', requestedActivityId, retryUrl: result }
+  }
   qrCodeLoading.value = true
 
   try {
@@ -228,7 +269,7 @@ async function handleCodeOrGestureSignSuccess(result: string) {
           </div>
         </div>
       </template>
-      <QrCodeSignModal v-model:show="showQrCodeModal" :title="doingActivity?.course.name" :loading="qrCodeLoading" @success="handleQrCodeSignSuccess">
+      <QrCodeSignModal v-model:show="showQrCodeModal" :title="doingActivity?.course.name" :loading="qrCodeLoading" :queue-overlay="qrOverlayMode" @success="handleQrCodeSignSuccess">
         <template #result>
           <p v-if="qrCodeResult" role="status">
             <n-text :type="qrCodeResult.status === 'pending' ? 'info' : qrCodeResult.status">{{ qrCodeResult.time }} {{ info.realname }} ({{ uid }}): {{ qrCodeResult.message }}</n-text>

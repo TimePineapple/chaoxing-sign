@@ -1,6 +1,6 @@
 {
   "name": "chaoxing-sign",
-  "version": "1.4.1",
+  "version": "0.5.2",
   "private": true,
   "packageManager": "pnpm@9.15.9",
   "author": {

@@ -37,13 +37,16 @@ export default defineEventHandler(async (event) => {
   })
   const cx = event.context.cx
   const prisma = event.context.prisma
+  const requestedClientId = getHeader(event, 'x-qr-client-id')
+  const clientId = requestedClientId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(requestedClientId)
+    ? requestedClientId : undefined
   const input: QrSignInput = {
     uid, activityId: body.activityId, code: body.code, enc: body.enc, courseId: body.courseId,
     location: body.location ? { latitude: body.location.latitude, longitude: body.location.longitude } : undefined,
   }
   setHeader(event, 'Cache-Control', 'no-store')
   return ResOp.success(qrSignQueue.submit({
-    ownerId: session.uid, uid, activityId: body.activityId,
-    run: signal => executeQrSign(cx, prisma, input, signal, traceId),
+    ownerId: session.uid, uid, activityId: body.activityId, clientId,
+    run: (signal, reportCourseName) => executeQrSign(cx, prisma, input, signal, traceId, reportCourseName),
   }))
 })

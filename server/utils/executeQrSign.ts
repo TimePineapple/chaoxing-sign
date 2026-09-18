@@ -28,7 +28,8 @@ export async function executeQrSign(
   body: QrSignInput,
   signal: AbortSignal,
   traceId: string,
-): Promise<{ result: string; activityName?: string }> {
+  onCourseNameResolved?: (name: string) => void,
+): Promise<{ result: string; activityName?: string; courseName?: string }> {
   const startedAt = Date.now()
   let stage = '读取活动详情'
   const trace = (step: string, details: Record<string, string | number | boolean> = {}) => {
@@ -81,6 +82,9 @@ export async function executeQrSign(
       throw new QrSignExecutionError(classId
         ? '未能在该账号的课程列表中匹配签到班级，请先同步课程后重试'
         : '活动详情缺少班级 ID 和课程 ID，无法预签到', 'COURSE_MISSING')
+
+    const courseName = cx.courseList?.find(course => String(course.courseId) === resolvedCourseId
+      && (!classId || String(course.classId) === classId))?.name?.trim()
 
     activity.code = body.code
     activity.enc = body.enc
@@ -154,11 +158,11 @@ export async function executeQrSign(
     signal.throwIfAborted()
     await createSignLog(cx, prisma, {
       activityId: String(activity.id), activityName: activity.name,
-      courseId: resolvedCourseId, classId,
+      courseId: resolvedCourseId, classId, courseName,
       type: activity.otherId, mode: SignMode.Manual, result,
-    })
+    }, onCourseNameResolved)
     trace('request complete', { success: result === '签到成功' })
-    return { result, activityName: activity.name }
+    return { result, activityName: activity.name, courseName }
   }
   catch (error) {
     const failure = error as { code?: string; response?: { statusCode?: number; headers?: Record<string, unknown>; body?: unknown } }

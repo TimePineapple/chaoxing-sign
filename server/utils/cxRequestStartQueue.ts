@@ -4,7 +4,7 @@ export class CxRequestStartQueue {
   private nextStart = 0
   private tail = Promise.resolve()
 
-  constructor(private readonly intervalMs = 200) {}
+  constructor(private readonly intervalMs = 150) {}
 
   async waitTurn(signal?: AbortSignal) {
     const previous = this.tail

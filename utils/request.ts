@@ -4,11 +4,10 @@ const { message } = createDiscreteApi(
   ['message'],
 )
 
-export function getHeaders(defaultHeaders = {}) {
-  return {
-    ...defaultHeaders,
-    // Authorization: useUserStore()?.token
-  }
+export function getHeaders(defaultHeaders: HeadersInit = {}) {
+  // ofetch normalizes request headers to a Headers instance before onRequest.
+  // Spreading that instance drops every header, including x-qr-client-id.
+  return new Headers(defaultHeaders)
 }
 
 const _fetch = $fetch.create({

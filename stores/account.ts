@@ -8,6 +8,7 @@ import { createQrSignTraceId, parseQrCodeSignLink } from '~/utils/qrCodeSign'
 import type { QrSubmitDecision } from '~/utils/qrSignProtocol'
 import type { QrCoordinates } from '~/utils/qrLocation'
 import { getFreshClientLocationForSign } from '~/utils/clientLocation.client'
+import { getQrSignClientId } from '~/utils/qrSignClient.client'
 
 export const useAccountStore = defineStore('account', () => {
   const accounts = ref<Account[]>([])
@@ -225,7 +226,7 @@ export const useAccountStore = defineStore('account', () => {
         method: 'POST',
         timeout: 10_000,
         retry: 0,
-        headers: { 'x-qr-sign-trace-id': traceId },
+        headers: { 'x-qr-sign-trace-id': traceId, 'x-qr-client-id': getQrSignClientId() },
         body: { uid, courseId, activityId, enc, code, url: link, location: location ?? undefined },
       })
       console.info(`[qr-code-sign][${traceId}] 客户端收到响应`, { code: response?.code, elapsedMs: Date.now() - startedAt })

@@ -3,6 +3,9 @@ import { SignTypeEnum } from '~/constants/cx'
 import { createQrSignTraceId, formatQrCodeFeedbackTime, parseQrCodeSignLink, qrCodeRequestError } from '~/utils/qrCodeSign'
 import { connectQrSignEvents } from '~/utils/qrSignEvents.client'
 import { getClientLocationForQr } from '~/utils/clientLocation.client'
+import { isOtherQrSignClient } from '~/utils/qrSignClient.client'
+import { qrJobFeedbackMessage, qrJobFeedbackTime } from '~/utils/qrSignFeedback'
+import { useQrSignOverlay } from '~/utils/useQrSignOverlay.client'
 import type { QrJobView, QrStreamSnapshot, QrSubmitDecision } from '~/utils/qrSignProtocol'
 
 const accountStore = useAccountStore()
@@ -13,6 +16,7 @@ const runtimeConfig = typeof useRuntimeConfig === 'function'
 
 const accounts = toRef(accountStore, 'accounts')
 const selectAccounts = toRef(accountStore, 'selectAccounts')
+const { mode: qrOverlayMode, applyJob: applyOverlayJob, applySnapshot: applyOverlaySnapshot, reset: resetOverlay } = useQrSignOverlay(computed(() => selectAccounts.value.map(account => account.uid)))
 
 const isAllChecked = ref(false)
 const indeterminate = computed(() => {
@@ -72,7 +76,7 @@ function applyQrJob(job: QrJobView) {
   if (row?.jobId && row.jobId !== job.id && row.status === 'pending')
     return
   if (!row) {
-    row = { uid: job.uid, name: account.info?.realname || job.uid, time: formatQrCodeFeedbackTime(),
+    row = { uid: job.uid, name: account.info?.realname || job.uid, time: qrJobFeedbackTime(job),
       traceId: createQrSignTraceId(), status: 'pending', message: '' }
     qrCodeResults.value.push(row)
   }
@@ -84,20 +88,28 @@ function applyQrJob(job: QrJobView) {
   const final = job.state === 'success' || job.state === 'error'
   row.jobId = job.id
   row.activityId = job.activityId
+  row.time = qrJobFeedbackTime(job)
   row.status = job.state === 'success' && !differentActivity ? 'success' : final ? 'error' : 'pending'
   row.message = differentActivity
     ? `先提交的活动 ${job.activityId}：${job.message}。你提交的活动 ${row.requestedActivityId} 尚未执行，请手动重新提交。`
-    : job.message
+    : qrJobFeedbackMessage(job, isOtherQrSignClient(job.clientId))
   retryFailedAvailable.value = autoSelectFailedOnRetry.value && qrCodeResults.value.some(item => item.status === 'error')
 }
 
 function handleQrSnapshot(snapshot: QrStreamSnapshot) {
   for (const job of snapshot.active)
     applyQrJob(job)
+  for (const job of snapshot.recentSuccess) {
+    if (snapshot.active.some(item => item.uid === job.uid))
+      continue
+    if (isOtherQrSignClient(job.clientId) || qrCodeResults.value.some(row => row.jobId === job.id))
+      applyQrJob(job)
+  }
   for (const row of qrCodeResults.value) {
     if (!row.jobId || row.status !== 'pending')
       continue
     const job = snapshot.active.find(item => item.id === row.jobId)
+      || snapshot.recentSuccess.find(item => item.id === row.jobId)
     if (job)
       applyQrJob(job)
     else {
@@ -114,13 +126,26 @@ watch(showQrCodeModal, (show) => {
   qrCodeLoading.value = false
   if (show) {
     closeQrEvents = connectQrSignEvents(
-      job => applyQrJob(job),
-      handleQrSnapshot,
+      (job) => {
+        if (!showQrCodeModal.value)
+          return
+        applyOverlayJob(job)
+        applyQrJob(job)
+      },
+      (snapshot) => {
+        if (!showQrCodeModal.value)
+          return
+        applyOverlaySnapshot(snapshot)
+        handleQrSnapshot(snapshot)
+      },
       () => {
         for (const row of qrCodeResults.value.filter(item => item.status === 'pending'))
           row.message = '结果连接中断，正在重连；请先核对签到历史，不要重复提交'
       },
     )
+  }
+  else {
+    resetOverlay()
   }
 })
 onBeforeUnmount(() => closeQrEvents?.())
@@ -128,14 +153,16 @@ onBeforeUnmount(() => closeQrEvents?.())
 function applyQrDecision(row: QrFeedback, decision: QrSubmitDecision, url: string, requestedActivityId: string) {
   if (row.jobId === decision.job.id && row.status !== 'pending')
     return
+  applyOverlayJob(decision.job)
   row.jobId = decision.job.id
   row.activityId = decision.job.activityId
   row.requestedActivityId = requestedActivityId
   row.retryUrl = url
   row.status = 'pending'
+  row.time = qrJobFeedbackTime(decision.job)
   row.message = decision.state === 'busy' && requestedActivityId !== decision.job.activityId
     ? `活动 ${decision.job.activityId} 正在处理；你提交的活动 ${requestedActivityId} 未执行。待其结束后请手动重新提交。`
-    : decision.job.message
+    : qrJobFeedbackMessage(decision.job, isOtherQrSignClient(decision.job.clientId))
 }
 
 async function openQrCodeSignModal() {
@@ -185,7 +212,6 @@ async function handleSuccess(result: string) {
     return
 
   const toAccounts = [...unref(selectAccounts)]
-  qrCodeResults.value = []
   retryFailedAvailable.value = false
   if (toAccounts.length === 0) {
     return logStore.log('请先选择账号', { type: 'warning' })
@@ -199,16 +225,23 @@ async function handleSuccess(result: string) {
   const requestedActivityId = parseQrCodeSignLink(result)?.activityId || ''
   const generation = qrModalGeneration
   qrCodeLoading.value = true
-  qrCodeResults.value = toAccounts.map((account): QrFeedback => ({
-    uid: account.uid,
-    name: account.info?.realname || account.uid,
-    time: formatQrCodeFeedbackTime(),
-    traceId: createQrSignTraceId(),
-    status: 'pending',
-    message: '正在提交任务',
-    requestedActivityId,
-    retryUrl: result,
-  }))
+  const activeRows = new Map(qrCodeResults.value
+    .filter(row => row.jobId && row.status === 'pending')
+    .map(row => [row.uid, row]))
+  qrCodeResults.value = toAccounts.map((account): QrFeedback => {
+    const active = activeRows.get(account.uid)
+    return {
+      ...(active || {}),
+      uid: account.uid,
+      name: account.info?.realname || account.uid,
+      time: active?.time || formatQrCodeFeedbackTime(),
+      traceId: createQrSignTraceId(),
+      status: 'pending',
+      message: active?.message || '正在提交任务',
+      requestedActivityId,
+      retryUrl: result,
+    }
+  })
   console.info('[qr-code-sign] 批量扫码开始', { count: toAccounts.length, traceIds: qrCodeResults.value.map(row => row.traceId) })
   const location = await getClientLocationForQr()
   if (generation !== qrModalGeneration)
@@ -320,7 +353,7 @@ async function handleCodeOrGestureSignSuccess(result: string) {
         批量扫码
       </n-button>
     </div>
-    <QrCodeSignModal v-model:show="showQrCodeModal" :title="doingActivity?.course?.name ?? '批量扫码'" :loading="qrCodeLoading" :dynamic-refresh-code="dynamicRefreshCode" :retry-failed-available="retryFailedAvailable" @success="handleSuccess" @retry-failed="handleRetryFailed">
+    <QrCodeSignModal v-model:show="showQrCodeModal" :title="doingActivity?.course?.name ?? '批量扫码'" :loading="qrCodeLoading" :queue-overlay="qrOverlayMode" :dynamic-refresh-code="dynamicRefreshCode" :retry-failed-available="retryFailedAvailable" @success="handleSuccess" @retry-failed="handleRetryFailed">
       <template #result>
         <ul v-if="qrCodeResults.length" aria-label="各账号扫码结果" class="mb-3">
           <li v-for="item in qrCodeResults" :key="item.uid">

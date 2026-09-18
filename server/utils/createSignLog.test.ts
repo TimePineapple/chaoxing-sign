@@ -12,6 +12,7 @@ it('queries Chaoxing once after success, saves the course name, and pushes to al
   const first = vi.fn()
   const second = vi.fn()
   const otherOwner = vi.fn()
+  const onCourseNameResolved = vi.fn()
   const closeFirst = recentSignBus.subscribe('web-a', first)
   const closeSecond = recentSignBus.subscribe('web-a', second)
   const closeOther = recentSignBus.subscribe('web-b', otherOwner)
@@ -19,8 +20,9 @@ it('queries Chaoxing once after success, saves the course name, and pushes to al
     await createSignLog(cx as any, prisma as any, {
       activityId: '10', activityName: '签到', courseId: 'course-1', classId: 'class-1',
       courseName: '旧课程名', type: 0, mode: 1, result: '签到成功',
-    })
+    }, onCourseNameResolved)
     await vi.waitFor(() => expect(first).toHaveBeenCalledOnce())
+    expect(onCourseNameResolved).toHaveBeenCalledWith('实时课程名')
     expect(getCourseList).toHaveBeenCalledOnce()
     expect(update).toHaveBeenCalledWith({ where: { id: 'log-a' }, data: { courseName: '实时课程名' } })
     expect(second).toHaveBeenCalledWith(expect.objectContaining({

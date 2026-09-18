@@ -3,17 +3,19 @@ import type { QrJobEvent, QrJobView, QrStreamSnapshot, QrSubmitDecision } from '
 
 interface Job extends QrJobView {
   ownerId: string
-  run: (signal: AbortSignal) => Promise<{ result: string; activityName?: string }>
+  run: (signal: AbortSignal, reportCourseName: (name: string) => void) => Promise<{ result: string; activityName?: string; courseName?: string }>
 }
 
 interface SubmitInput {
   ownerId: string
   uid: string
   activityId: string
+  clientId?: string
   run: Job['run']
 }
 
 const TIMEOUT_MESSAGE = '等待签到响应超时，结果尚未确认；请先核对签到历史再决定是否重试'
+const RECENT_SUCCESS_MS = 60_000
 
 function safeText(value?: string) {
   if (!value)
@@ -27,22 +29,29 @@ export class QrSignQueue {
   private readonly active = new Map<string, Job>()
   private readonly waiting: Job[] = []
   private readonly history: Array<{ ownerId: string; event: QrJobEvent; expiresAt: number }> = []
+  private readonly recentSuccess = new Map<string, { ownerId: string; view: QrJobView }>()
   private readonly listeners = new Map<string, Set<(event: QrJobEvent) => void>>()
   private sequence = 0
   private lastStartedAt = 0
   private timer: ReturnType<typeof setTimeout> | undefined
 
-  constructor(private readonly intervalMs = 200, private readonly timeoutMs = 45_000) {}
+  constructor(private readonly intervalMs = 150, private readonly timeoutMs = 45_000) {}
 
   private prune() {
     const now = Date.now()
     while (this.history.length && this.history[0].expiresAt <= now)
       this.history.shift()
+    for (const [id, item] of this.recentSuccess) {
+      if (!item.view.completedAt || item.view.completedAt + RECENT_SUCCESS_MS <= now)
+        this.recentSuccess.delete(id)
+    }
   }
 
   private view(job: QrJobView): QrJobView {
-    return { id: job.id, uid: job.uid, activityId: job.activityId, state: job.state,
-      message: safeText(job.message) || '', result: safeText(job.result), activityName: safeText(job.activityName) }
+    return { id: job.id, uid: job.uid, activityId: job.activityId, clientId: job.clientId,
+      submittedAt: job.submittedAt, completedAt: job.completedAt, state: job.state,
+      message: safeText(job.message) || '', result: safeText(job.result),
+      activityName: safeText(job.activityName), courseName: safeText(job.courseName) }
   }
 
   private publish(job: Job) {
@@ -63,6 +72,7 @@ export class QrSignQueue {
 
     const job: Job = {
       id: randomUUID(), uid: input.uid, ownerId: input.ownerId,
+      clientId: input.clientId, submittedAt: Date.now(),
       activityId: input.activityId, state: 'queued', message: '已进入服务器扫码队列',
       run: input.run,
     }
@@ -102,9 +112,21 @@ export class QrSignQueue {
       }, this.timeoutMs)
     })
     try {
-      const outcome = await Promise.race([job.run(controller.signal), deadline])
+      const outcome = await Promise.race([job.run(controller.signal, (name) => {
+        const courseName = name.trim()
+        if (!courseName || job.state === 'error' || (job.completedAt && job.completedAt + RECENT_SUCCESS_MS <= Date.now()))
+          return
+        if (job.courseName !== courseName) {
+          job.courseName = courseName
+          if (job.state === 'success' && this.recentSuccess.has(job.id)) {
+            this.recentSuccess.set(job.id, { ownerId: job.ownerId, view: this.view(job) })
+            this.publish(job)
+          }
+        }
+      }), deadline])
       job.result = outcome.result
       job.activityName = outcome.activityName
+      job.courseName = job.courseName || outcome.courseName
       job.state = outcome.result === '签到成功' ? 'success' : 'error'
       job.message = outcome.result
     }
@@ -123,6 +145,9 @@ export class QrSignQueue {
       if (timeout)
         clearTimeout(timeout)
       this.active.delete(job.uid)
+      job.completedAt = Date.now()
+      if (job.state === 'success')
+        this.recentSuccess.set(job.id, { ownerId: job.ownerId, view: this.view(job) })
       this.publish(job)
     }
   }
@@ -131,12 +156,17 @@ export class QrSignQueue {
     this.prune()
     return {
       active: [...this.active.values()].filter(job => job.ownerId === ownerId).map(job => this.view(job)),
+      recentSuccess: [...this.recentSuccess.values()]
+        .filter(item => item.ownerId === ownerId)
+        .map(item => item.view),
     }
   }
 
   replay(ownerId: string, afterSequence: number): QrJobEvent[] {
     this.prune()
-    return this.history.filter(item => item.ownerId === ownerId && item.event.sequence > afterSequence)
+    return this.history.filter(item => item.ownerId === ownerId && item.event.sequence > afterSequence
+      && (item.event.state !== 'success' || !item.event.completedAt
+        || item.event.completedAt + RECENT_SUCCESS_MS > Date.now()))
       .map(item => item.event)
   }
 

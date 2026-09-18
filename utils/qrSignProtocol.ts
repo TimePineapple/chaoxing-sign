@@ -4,10 +4,14 @@ export interface QrJobView {
   id: string
   uid: string
   activityId: string
+  clientId?: string
+  submittedAt: number
+  completedAt?: number
   state: QrJobState
   message: string
   result?: string
   activityName?: string
+  courseName?: string
 }
 
 export interface QrJobEvent extends QrJobView {
@@ -20,4 +24,5 @@ export type QrSubmitDecision =
 
 export interface QrStreamSnapshot {
   active: QrJobView[]
+  recentSuccess: QrJobView[]
 }
