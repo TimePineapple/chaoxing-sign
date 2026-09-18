@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ResOp } from '../server/utils'
 import { getQrSignTraceId, isQrSignRequest } from '../server/utils/qrSignTrace'
+import { browserLocationToBaidu, offsetQrLocation } from '../server/utils/qrLocation'
 
 const signLink = 'https://mobilelearn.chaoxing.com/widget/sign/e?id=100&c=200&enc=FIXTURE'
 const activity = { id: 100, courseId: 'course-1', clazzId: 300, activeType: 2, status: 1, otherId: 2, name: 'Fixture sign' }
@@ -12,6 +13,7 @@ function fixture(uid: string, ownerId = 'web-a') {
   const cx = {
     user: { uid }, courseList: [],
     getActivityDetail: vi.fn().mockResolvedValue(activity),
+    getQrSignLocationRequirement: vi.fn().mockResolvedValue(true),
     getCourseList: vi.fn().mockResolvedValue([]),
     preSign: vi.fn().mockResolvedValue(undefined),
     signQrCode: vi.fn().mockResolvedValue('签到成功'),
@@ -37,6 +39,11 @@ beforeEach(async () => {
   vi.useFakeTimers()
   vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'))
   vi.resetModules()
+  vi.stubEnv('BAIDU_MAP_SERVER_AK', 'fixture-map-ak')
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+    ok: true,
+    json: async () => ({ status: 0, result: { formatted_address: '北京市东城区某路' } }),
+  }))
   vi.stubGlobal('defineEventHandler', (fn: unknown) => fn)
   vi.stubGlobal('readBody', (event: any) => Promise.resolve(event.body))
   vi.stubGlobal('getHeader', (event: any, name: string) => event.headers?.[name])
@@ -49,6 +56,7 @@ beforeEach(async () => {
 
 afterEach(() => {
   vi.useRealTimers()
+  vi.unstubAllEnvs()
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
 })
@@ -65,6 +73,8 @@ describe('QR submission endpoint', () => {
     await vi.advanceTimersByTimeAsync(0)
     expect(received).toEqual(['queued', 'running', 'success'])
     expect(cx.signQrCode).toHaveBeenCalledTimes(1)
+    expect(cx.signQrCode.mock.calls[0][2]).toBe('course-1')
+    expect(cx.signQrCode.mock.calls[0][5]).toBe('qr-fixture-123456')
     expect(prisma.signLog.create).toHaveBeenCalledTimes(1)
     await vi.waitFor(() => expect(prisma.signLog.update).toHaveBeenCalledWith({
       where: { id: 'saved-sign-log' }, data: { courseName: '示例课程' },
@@ -99,6 +109,87 @@ describe('QR submission endpoint', () => {
     expect(started[1] - started[0]).toBe(200)
     expect(a.prisma.signLog.create).toHaveBeenCalledTimes(1)
     expect(b.prisma.signLog.create).toHaveBeenCalledTimes(1)
+  })
+
+  it('uses a separate nearby position per account and keeps the missing-location fallback', async () => {
+    const a = fixture('cx-a', 'web-a')
+    const b = fixture('cx-b', 'web-b')
+    a.event.body.location = { latitude: 39.908823, longitude: 116.39747 }
+    b.event.body.location = { latitude: 39.908823, longitude: 116.39747 }
+    const random = vi.spyOn(Math, 'random').mockReturnValueOnce(0.25).mockReturnValueOnce(0)
+      .mockReturnValueOnce(0.25).mockReturnValueOnce(0.5)
+    await handler(a.event)
+    await handler(b.event)
+    await vi.advanceTimersByTimeAsync(200)
+    const aLocation = a.cx.signQrCode.mock.calls[0][4]
+    const bLocation = b.cx.signQrCode.mock.calls[0][4]
+    const firstRandom = [0.25, 0]
+    const expectedBaiduLocation = browserLocationToBaidu(offsetQrLocation(a.event.body.location, () => firstRandom.shift()!))
+    expect(aLocation).toMatchObject({ latitude: expect.any(Number), longitude: expect.any(Number), address: '北京市东城区某路' })
+    expect(aLocation).toMatchObject(expectedBaiduLocation)
+    expect(bLocation).toMatchObject({ latitude: expect.any(Number), longitude: expect.any(Number), address: '北京市东城区某路' })
+    expect(aLocation).not.toEqual(bLocation)
+    expect(random).toHaveBeenCalledTimes(4)
+    expect(fetch).toHaveBeenCalledTimes(1)
+
+    const c = fixture('cx-c', 'web-c')
+    await handler(c.event)
+    await vi.advanceTimersByTimeAsync(200)
+    expect(c.cx.signQrCode.mock.calls[0][4]).toBeUndefined()
+  })
+
+  it('omits position parameters when the QR activity does not request a location', async () => {
+    const { cx, event } = fixture('cx-a')
+    event.body.location = { latitude: 39.908823, longitude: 116.39747 }
+    cx.getQrSignLocationRequirement.mockResolvedValue(false)
+    await handler(event)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(cx.getQrSignLocationRequirement).toHaveBeenCalledWith(100, expect.any(AbortSignal))
+    expect(cx.signQrCode.mock.calls[0][4]).toBeUndefined()
+  })
+
+  it('stops before upstream submission when the map AK is missing', async () => {
+    const { cx, event } = fixture('cx-a')
+    event.body.location = { latitude: 39.908823, longitude: 116.39747 }
+    vi.stubEnv('BAIDU_MAP_SERVER_AK', '')
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    await handler(event)
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(cx.signQrCode).not.toHaveBeenCalled()
+    expect(queue.replay('web-a', 0).at(-1)).toMatchObject({
+      state: 'error', message: expect.stringContaining('未配置百度地图服务端 AK'),
+    })
+    expect(error).toHaveBeenCalledWith(
+      '[qr-code-sign][qr-fixture-123456] request failed',
+      expect.objectContaining({ code: 'BAIDU_MAP_AK_MISSING' }),
+    )
+  })
+
+  it('logs the upstream location rejection code without treating its HTTP response as a request failure', async () => {
+    const { cx, event } = fixture('cx-a')
+    event.body.location = { latitude: 39.908823, longitude: 116.39747 }
+    cx.signQrCode.mockResolvedValue('locationAuthError_LCR007')
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    await handler(event)
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(warning).toHaveBeenCalledWith(
+      '[qr-code-sign][qr-fixture-123456] upstream rejected',
+      expect.objectContaining({ code: 'locationAuthError_LCR007' }),
+    )
+    expect(queue.replay('web-a', 0).at(-1)).toMatchObject({
+      state: 'error', result: 'locationAuthError_LCR007',
+    })
+  })
+
+  it('rejects invalid client coordinates before enqueueing', async () => {
+    const { event } = fixture('cx-a')
+    event.body.location = { latitude: 120, longitude: 116 }
+    await expect(handler(event)).rejects.toMatchObject({ statusCode: 400 })
+    expect(queue.snapshot('web-a').active).toEqual([])
   })
 
   it('checks website ownership before queueing and never exposes other owners in event snapshots', async () => {

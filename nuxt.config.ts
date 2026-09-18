@@ -39,7 +39,7 @@ export default defineNuxtConfig({
       footerConfig,
       qrCode: {
         autoSelectFailedOnRetry: true,
-        waitForSecondUrl: true,
+        waitForSecondUrl: 12,
       },
     },
   },

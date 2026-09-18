@@ -1,15 +1,19 @@
 import { SignMode } from '~/constants/cx'
 import { createSignLog } from '~/server/utils/createSignLog'
+import { isQrCoordinates, type QrCoordinates } from '~/utils/qrLocation'
 
 interface Body {
   course: Course
   uid: string
+  location?: QrCoordinates | null
 }
 
 export default defineEventHandler(async (event) => {
-  const { course } = await readBody<Body>(event)
+  const { course, location } = await readBody<Body>(event)
+  if (location != null && !isQrCoordinates(location))
+    throw createError({ statusCode: 400, statusMessage: '签到位置格式无效' })
 
-  const data = await event.context.cx.signByCourse(course)
+  const data = await event.context.cx.signByCourse(course, location ?? null)
 
   if (data.length > 0) {
     for (const item of data) {

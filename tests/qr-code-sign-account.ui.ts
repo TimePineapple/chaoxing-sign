@@ -15,16 +15,28 @@ class FakeEventSource {
 
 let app: ReturnType<typeof Vue.createApp> | undefined
 let container: HTMLDivElement | undefined
+const originalGeolocation = Object.getOwnPropertyDescriptor(navigator, 'geolocation')
 
 afterEach(() => {
   app?.unmount()
   container?.remove()
+  if (originalGeolocation)
+    Object.defineProperty(navigator, 'geolocation', originalGeolocation)
+  else
+    Reflect.deleteProperty(navigator, 'geolocation')
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
   vi.useRealTimers()
 })
 
 it('shows a server-pushed final result in the single-account scan modal', async () => {
+  Object.defineProperty(navigator, 'geolocation', { configurable: true, value: {
+    getCurrentPosition: (success: PositionCallback) => success({
+      coords: { latitude: 39.9, longitude: 116.4 },
+    } as GeolocationPosition),
+  } })
+  const { refreshClientLocation } = await import('../utils/clientLocation.client')
+  await refreshClientLocation()
   for (const [name, value] of Object.entries({ ref: Vue.ref, computed: Vue.computed, watch: Vue.watch, unref: Vue.unref, onBeforeUnmount: Vue.onBeforeUnmount }))
     vi.stubGlobal(name, value)
   vi.stubGlobal('EventSource', FakeEventSource)
@@ -57,6 +69,7 @@ it('shows a server-pushed final result in the single-account scan modal', async 
   await Vue.nextTick()
   await accountInstance.$.setupState.handleQrCodeSignSuccess(link)
   expect(signByQrCode).toHaveBeenCalledTimes(1)
+  expect(signByQrCode.mock.calls[0][4]).toEqual({ latitude: 39.9, longitude: 116.4 })
   FakeEventSource.current?.emit('job', { ...job, state: 'success', message: '签到成功', result: '签到成功', sequence: 3 })
   await Vue.nextTick()
   expect(container.querySelector('.single-result')?.textContent).toContain('签到成功')

@@ -2,6 +2,7 @@
 import { SignTypeEnum } from '~/constants/cx'
 import { createQrSignTraceId, formatQrCodeFeedbackTime, parseQrCodeSignLink, qrCodeRequestError } from '~/utils/qrCodeSign'
 import { connectQrSignEvents } from '~/utils/qrSignEvents.client'
+import { getClientLocationForQr } from '~/utils/clientLocation.client'
 import type { QrJobView, QrStreamSnapshot, QrSubmitDecision } from '~/utils/qrSignProtocol'
 
 const accountStore = useAccountStore()
@@ -208,10 +209,13 @@ async function handleSuccess(result: string) {
     retryUrl: result,
   }))
   console.info('[qr-code-sign] 批量扫码开始', { count: toAccounts.length, traceIds: qrCodeResults.value.map(row => row.traceId) })
+  const location = await getClientLocationForQr()
+  if (generation !== qrModalGeneration)
+    return
   await Promise.allSettled(toAccounts.map(async (account, index) => {
     const row = qrCodeResults.value[index]!
     try {
-      const decision = await accountStore.signByQrCode(account.uid, result, courseId, row.traceId)
+      const decision = await accountStore.signByQrCode(account.uid, result, courseId, row.traceId, location)
       if (generation === qrModalGeneration)
         applyQrDecision(row, decision, result, requestedActivityId)
     }
@@ -246,7 +250,8 @@ async function retryQrSubmission(row: QrFeedback) {
   row.message = '正在重新提交任务'
   qrCodeLoading.value = true
   try {
-    const decision = await accountStore.signByQrCode(row.uid, url, undefined, row.traceId)
+    const location = await getClientLocationForQr()
+    const decision = await accountStore.signByQrCode(row.uid, url, undefined, row.traceId, location)
     if (generation === qrModalGeneration)
       applyQrDecision(row, decision, url, activityId)
   }

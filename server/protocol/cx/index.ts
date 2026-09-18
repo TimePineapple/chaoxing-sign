@@ -1,4 +1,5 @@
 import { qsParse, qsStringify, sleep, timestamp } from '@kuizuo/utils'
+import { createHash, randomUUID } from 'node:crypto'
 import { setTimeout as delay } from 'node:timers/promises'
 import { mapLimit } from 'async'
 import type { Got } from 'got'
@@ -7,6 +8,9 @@ import * as cheerio from 'cheerio'
 import got from 'got'
 import { CxProxyError, getCxProxyOptions } from './proxy'
 import { cxRequestStartQueue } from '~/server/utils/cxRequestStartQueue'
+import { qrCookieSnapshot, qrSetCookieNames, safeQrContentType, summarizeQrCookieChanges, summarizeQrUpstreamBody } from '~/server/utils/qrUpstreamFeedback'
+import { resolveClientSignLocation } from '~/server/utils/resolveClientSignLocation'
+import type { QrCoordinates } from '~/utils/qrLocation'
 
 export enum ActivityTypeEnum {
   Sign = 2, // 签到
@@ -60,6 +64,11 @@ export class Cx {
   public http!: Got
   public cookieJar: CookieJar
   public currentUrl = ''
+  private readonly deviceCode = (() => {
+    const seed = randomUUID().replaceAll('-', '') + randomUUID().replaceAll('-', '')
+    const digest = createHash('sha256').update(seed).digest()
+    return Buffer.concat([digest, digest]).toString('base64')
+  })()
 
   public user!: CX.User
   public setting!: CX.Setting
@@ -256,27 +265,69 @@ export class Cx {
     return data
   }
 
+  async getQrSignLocationRequirement(activeId: string | number, signal?: AbortSignal): Promise<boolean | undefined> {
+    const { body } = await this.http.get<{ data?: { ifopenAddress?: number | string } }>(
+      'https://mobilelearn.chaoxing.com/v2/apis/active/getPPTActiveInfo',
+      { searchParams: { activeId }, signal },
+    )
+    const flag = body?.data?.ifopenAddress
+    if (flag === 1 || flag === '1')
+      return true
+    if (flag === 0 || flag === '0')
+      return false
+    return undefined
+  }
+
   /*
     需要先发送预签到请求 才能够正常记录签到记录
   */
-  async preSign(course: CX.Course, activity: CX.ActivityDetail, signal?: AbortSignal) {
-    const { body: html } = await this.http.get('https://mobilelearn.chaoxing.com/newsign/preSign', {
-      searchParams: {
-        courseId: course.courseId || '',
-        classId: course.classId,
-        activePrimaryId: activity.id,
-        general: '1',
-        sys: '1',
-        ls: '1',
-        appType: '15',
-        uid: this.user.uid,
-        isTeacherViewOpen: 0,
-        // 是否为刷新二维码的
-        ...((activity.ifRefreshEwm) && { rcode: encodeURIComponent(`SIGNIN:aid=${activity.id}&source=15&Code=${activity.code}&enc=${activity.enc}`) }),
-      },
+  async preSign(course: CX.Course, activity: CX.ActivityDetail, signal?: AbortSignal, traceId?: string) {
+    const upstreamUrl = 'https://mobilelearn.chaoxing.com/newsign/preSign'
+    const cookiesBefore = traceId ? qrCookieSnapshot(this.cookieJar, upstreamUrl) : undefined
+    const preSignParams = {
+      courseId: course.courseId || '',
+      classId: course.classId,
+      activePrimaryId: activity.id,
+      general: '1',
+      sys: '1',
+      ls: '1',
+      appType: '15',
+      uid: this.user.uid,
+      isTeacherViewOpen: 0,
+      // 是否为刷新二维码的
+      ...((activity.ifRefreshEwm) && { rcode: encodeURIComponent(`SIGNIN:aid=${activity.id}&source=15&Code=${activity.code}&enc=${activity.enc}`) }),
+    }
+    if (traceId) {
+      console.info(`[qr-code-sign][${traceId}] pre-sign request`, {
+        requestKeys: Object.keys(preSignParams).sort(),
+        courseIdPresent: Boolean(preSignParams.courseId),
+        classIdPresent: Boolean(preSignParams.classId),
+        activePrimaryIdPresent: Boolean(preSignParams.activePrimaryId),
+        uidPresent: Boolean(preSignParams.uid),
+        utPresent: Object.hasOwn(preSignParams, 'ut'),
+      })
+    }
+    const preSignResponse = await this.http.get(upstreamUrl, {
+      searchParams: preSignParams,
       responseType: 'text',
       signal,
     })
+    const html = preSignResponse.body
+    const $ = cheerio.load(html)
+    const status = $('#statuscontent').text().trim().replaceAll(/[\n\s]/g, '')
+    if (traceId && cookiesBefore) {
+      console.info(`[qr-code-sign][${traceId}] pre-sign HTTP response`, {
+        status: preSignResponse.statusCode,
+        contentType: safeQrContentType(preSignResponse.headers['content-type']),
+        redirectCount: preSignResponse.redirectUrls?.length ?? 0,
+        locationHeaderPresent: Boolean(preSignResponse.headers.location),
+        setCookieNames: qrSetCookieNames(preSignResponse.headers['set-cookie']),
+        ...summarizeQrCookieChanges(cookiesBefore, qrCookieSnapshot(this.cookieJar, upstreamUrl)),
+        bodyLength: html.length,
+        statusElementPresent: $('#statuscontent').length > 0,
+        statusSummary: summarizeQrUpstreamBody(status),
+      })
+    }
 
     if (signal)
       await delay(500, undefined, { signal })
@@ -284,7 +335,7 @@ export class Cx {
       await sleep(500)
 
     // 两条必要请求!  位置签到必备
-    const { body: data } = await this.http.get(
+    const analysisResponse = await this.http.get(
       'https://mobilelearn.chaoxing.com/pptSign/analysis',
       {
         searchParams: {
@@ -296,8 +347,18 @@ export class Cx {
         signal,
       },
     )
+    const data = analysisResponse.body
     const code = data.match(/code='\+'(.*?)'/)?.[1]
-    await this.http.get(
+    if (traceId) {
+      console.info(`[qr-code-sign][${traceId}] analysis HTTP response`, {
+        status: analysisResponse.statusCode,
+        contentType: safeQrContentType(analysisResponse.headers['content-type']),
+        redirectCount: analysisResponse.redirectUrls?.length ?? 0,
+        bodyLength: data.length,
+        codePresent: Boolean(code),
+      })
+    }
+    const analysis2Response = await this.http.get(
       'https://mobilelearn.chaoxing.com/pptSign/analysis2',
       {
         searchParams: {
@@ -308,15 +369,21 @@ export class Cx {
         signal,
       },
     )
+    if (traceId) {
+      console.info(`[qr-code-sign][${traceId}] analysis2 HTTP response`, {
+        status: analysis2Response.statusCode,
+        contentType: safeQrContentType(analysis2Response.headers['content-type']),
+        redirectCount: analysis2Response.redirectUrls?.length ?? 0,
+        ...summarizeQrUpstreamBody(analysis2Response.body),
+      })
+    }
     if (signal)
       await delay(500, undefined, { signal })
     else
       await sleep(500)
 
-    const $ = cheerio.load(html)
-
-    const status = $('#statuscontent').text().trim().replaceAll(/[\n\s]/g, '')
-    console.log(`${course.name} ${signTypeMap[activity.otherId]} 预签到状态: `, status)
+    if (!traceId)
+      console.log(`${course.name} ${signTypeMap[activity.otherId]} 预签到状态: `, status)
     if (status)
       return status
   }
@@ -324,12 +391,32 @@ export class Cx {
   /*
     签到请求
   */
-  async stuSign(query: string, signal?: AbortSignal) {
-    const { body: data } = await this.http.get('https://mobilelearn.chaoxing.com/pptSign/stuSignajax', {
-      searchParams: query,
-      responseType: 'text',
-      signal,
-    })
+  async stuSign(query: string, signal?: AbortSignal, traceId?: string, method: 'GET' | 'POST' = 'GET') {
+    const url = 'https://mobilelearn.chaoxing.com/pptSign/stuSignajax'
+    const response = method === 'POST'
+      ? await this.http.post<string>(url, {
+          body: query,
+          headers: {
+            'content-type': 'application/x-www-form-urlencoded; charset=UTF-8',
+            'x-requested-with': 'XMLHttpRequest',
+            origin: 'https://mobilelearn.chaoxing.com',
+          },
+          responseType: 'text',
+          signal,
+        })
+      : await this.http.get<string>(url, {
+          searchParams: query,
+          responseType: 'text',
+          signal,
+        })
+    const data = response.body
+    if (traceId) {
+      console.info(`[qr-code-sign][${traceId}] upstream HTTP response`, {
+        status: response.statusCode,
+        contentType: safeQrContentType(response.headers['content-type']),
+        ...summarizeQrUpstreamBody(data),
+      })
+    }
 
     if (data === 'success' || data === '您已签到过了')
       return '签到成功'
@@ -441,7 +528,7 @@ export class Cx {
       longitude: '-1',
     }) {
     // 位置 https://api.map.baidu.com/lbsapi/getpoint/index.html
-    const query = qsStringify({
+    const query = new URLSearchParams(Object.entries({
       activeId: activity.id,
       address: location.text,
       uid: this.user.uid,
@@ -453,26 +540,89 @@ export class Cx {
       name: this.user.realname,
       ifTiJiao: 1,
       validate: '',
-    }, '', '', { encodeURIComponent: s => s })
+    }).map(([key, value]) => [key, String(value)])).toString()
 
     return this.stuSign(query)
   }
 
-  async signQrCode(activity: CX.ActivityDetail, enc: string, signal?: AbortSignal) {
-    const query = qsStringify({
+  async signQrCode(activity: CX.ActivityDetail, enc: string, courseId: string, signal?: AbortSignal, location?: { latitude: number; longitude: number; address: string }, traceId?: string) {
+    const locationData = location
+      ? {
+          result: 1,
+          address: location.address,
+          longitude: Number(location.longitude.toFixed(6)),
+          latitude: Number(location.latitude.toFixed(6)),
+        }
+      : undefined
+    const locationResult = locationData
+      ? {
+          result: 1,
+          latitude: locationData.latitude,
+          longitude: locationData.longitude,
+          mockData: { strategy: 500, probability: 1 },
+        }
+      : undefined
+    const params = {
       enc,
       name: this.user.realname,
       activeId: activity.id,
       uid: this.user.uid,
       clientip: '',
-      useragent: '',
+      ...(locationData ? { location: JSON.stringify(locationData) } : {}),
+      ...(locationResult ? { locationResult: JSON.stringify(locationResult) } : {}),
       latitude: '-1',
       longitude: '-1',
       fid: this.user.schoolid,
       appType: '15',
-    }, '', '', { encodeURIComponent: s => s })
+      vpProbability: 1,
+      vpStrategy: '500',
+      deviceCode: this.deviceCode,
+      currentFaceId: '',
+      ifCFP: '0',
+      courseId,
+      faceEnc: '',
+      faceCode: '',
+      faceEncAid: '',
+    }
+    if (traceId) {
+      console.info(`[qr-code-sign][${traceId}] sign submit request`, {
+        method: locationData ? 'POST' : 'GET',
+        requestKeys: Object.keys(params).sort(),
+        topLevelCoordinatesDefault: params.latitude === '-1' && params.longitude === '-1',
+        nestedLocationProvided: Boolean(locationData),
+        nestedLocationIsDefault: locationData?.latitude === -1 && locationData?.longitude === -1,
+        courseIdPresent: Boolean(courseId),
+        cookieNames: [...qrCookieSnapshot(this.cookieJar, 'https://mobilelearn.chaoxing.com/pptSign/stuSignajax').keys()].sort(),
+      })
+      console.info(`[qr-code-sign][${traceId}] sign submit location fields`, {
+        addressPresent: Object.hasOwn(params, 'address'),
+        nestedAddressPresent: locationData !== undefined,
+        nestedAddressNonEmpty: Boolean(locationData?.address),
+        locationPresent: Object.hasOwn(params, 'location'),
+        locationResultPresent: Object.hasOwn(params, 'locationResult'),
+        latitudePresent: Object.hasOwn(params, 'latitude'),
+        longitudePresent: Object.hasOwn(params, 'longitude'),
+        courseIdPresent: Boolean(params.courseId),
+        faceFieldsPresent: ['currentFaceId', 'ifCFP', 'faceEnc', 'faceCode', 'faceEncAid'].every(key => Object.hasOwn(params, key)),
+        encPresent: Boolean(enc),
+        encLength: enc.length,
+        deviceCodePresent: Boolean(this.deviceCode),
+        deviceCodeLength: this.deviceCode.length,
+        vpProbabilityType: typeof params.vpProbability,
+        vpStrategyEmpty: !params.vpStrategy,
+      })
+    }
+    const query = new URLSearchParams(Object.entries(params).map(([key, value]) => [key, String(value)])).toString()
+    if (traceId) {
+      const decoded = new URLSearchParams(query)
+      console.info(`[qr-code-sign][${traceId}] sign submit encoding`, {
+        deviceCodePreserved: decoded.get('deviceCode') === this.deviceCode,
+        locationPreserved: decoded.get('location') === (locationData ? JSON.stringify(locationData) : null),
+        locationResultPreserved: decoded.get('locationResult') === (locationResult ? JSON.stringify(locationResult) : null),
+      })
+    }
 
-    return this.stuSign(query, signal)
+    return this.stuSign(query, signal, traceId, locationData ? 'POST' : 'GET')
   }
 
   async getAllActivity(type?: ActivityTypeEnum, status?: ActivityStatusEnum) {
@@ -490,7 +640,7 @@ export class Cx {
       }))
   }
 
-  async signByCourse(course: CX.Course) {
+  async signByCourse(course: CX.Course, clientLocation?: QrCoordinates | null) {
     const activityList = await this.getActivityList(course)
 
     const signActivityList = activityList.filter(activity => activity.type === ActivityTypeEnum.Sign && activity.status === ActivityStatusEnum.Doing)
@@ -500,7 +650,7 @@ export class Cx {
     for await (const a of signActivityList) {
       if (a.type === ActivityTypeEnum.Sign) {
         const activity = await this.getActivityDetail(a.id)
-        const result = await this.handleSign(course, activity)
+        const result = await this.handleSign(course, activity, undefined, clientLocation)
 
         console.log(`课程: ${course.name} 签到结果: ${result}`)
 
@@ -518,14 +668,14 @@ export class Cx {
     return signResults
   }
 
-  async signByActivity(course: CX.Course, activity: CX.ActivityDetail) {
+  async signByActivity(course: CX.Course, activity: CX.ActivityDetail, clientLocation?: QrCoordinates | null) {
     if (!(activity.activeType === ActivityTypeEnum.Sign && activity.status === ActivityStatusEnum.Doing)) {
       return {
         activity,
         result: '不是签到活动或活动已结束',
       }
     }
-    const result = await this.handleSign(course, activity)
+    const result = await this.handleSign(course, activity, undefined, clientLocation)
 
     console.log(`课程: ${course.name} 签到结果: ${result}`)
 
@@ -564,7 +714,7 @@ export class Cx {
     return signResults
   }
 
-  async handleSign(course: CX.Course, activity: CX.ActivityDetail, setting?: CX.Setting) {
+  async handleSign(course: CX.Course, activity: CX.ActivityDetail, setting?: CX.Setting, clientLocation?: QrCoordinates | null) {
     const status = await this.preSign(course, activity)
 
     if (status === '签到成功')
@@ -588,7 +738,11 @@ export class Cx {
         return '失败'
 
       case SignTypeEnum.Location:
+        if (clientLocation === null)
+          return '浏览器定位不可用，未提交位置签到'
         await sleep(500)
+        if (clientLocation)
+          return await this.signLocation(activity, await resolveClientSignLocation(clientLocation))
         return await this.signLocation(activity, setting?.location)
 
       case SignTypeEnum.QRCode:

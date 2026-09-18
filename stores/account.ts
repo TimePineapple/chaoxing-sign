@@ -6,6 +6,8 @@ import type { Account, Activity, Course, Setting } from '~/types/account'
 import type { RecentSign, RecentSignEvent } from '~/types/recentSign'
 import { createQrSignTraceId, parseQrCodeSignLink } from '~/utils/qrCodeSign'
 import type { QrSubmitDecision } from '~/utils/qrSignProtocol'
+import type { QrCoordinates } from '~/utils/qrLocation'
+import { getFreshClientLocationForSign } from '~/utils/clientLocation.client'
 
 export const useAccountStore = defineStore('account', () => {
   const accounts = ref<Account[]>([])
@@ -128,9 +130,10 @@ export const useAccountStore = defineStore('account', () => {
     根据课程签到
   */
   async function signByCourse(uid: string, course: Course) {
+    const location = await getFreshClientLocationForSign()
     const { data } = await request(`/api/cx/courses/${course.courseId}/sign`, {
       method: 'POST',
-      body: { uid, course },
+      body: { uid, course, location },
     })
 
     if (data.length === 0) {
@@ -152,9 +155,10 @@ export const useAccountStore = defineStore('account', () => {
     根据指定(签到)活动签到
    */
   async function signByActivity(uid: string, course: Course, activity: Activity) {
+    const location = Number(activity.otherId) === 4 ? await getFreshClientLocationForSign() : undefined
     const { data } = await request(`/api/cx/courses/${course.courseId}/activities/${activity.id}/sign`, {
       method: 'POST',
-      body: { uid, course, activity },
+      body: { uid, course, activity, location },
     })
 
     const signType = signTypeMap[activity.otherId] ?? '未知'
@@ -201,7 +205,7 @@ export const useAccountStore = defineStore('account', () => {
   /*
     二维码签到
   */
-  async function signByQrCode(uid: string, link: string, courseId?: string, traceId = createQrSignTraceId()): Promise<QrSubmitDecision> {
+  async function signByQrCode(uid: string, link: string, courseId?: string, traceId = createQrSignTraceId(), location?: QrCoordinates | null): Promise<QrSubmitDecision> {
     // 提取 activityId 和 enc
     // https://mobilelearn.chaoxing.com/widget/sign/e?id=8000063022220&c=529773&enc=A5BC081D895B41540E129437F6B4180F&DB_STRATEGY=PRIMARY_KEY&STRATEGY_PARA=id
 
@@ -211,7 +215,10 @@ export const useAccountStore = defineStore('account', () => {
 
     const { activityId, code, enc } = parsed
     const startedAt = Date.now()
-    console.info(`[qr-code-sign][${traceId}] 客户端发送请求`)
+    console.info(`[qr-code-sign][${traceId}] 客户端发送请求`, {
+      locationProvided: Boolean(location),
+      locationIsDefault: location?.latitude === -1 && location?.longitude === -1,
+    })
     let response: API.Result<QrSubmitDecision>
     try {
       response = await request(`/api/cx/accounts/${uid}/sign_by_qrcode`, {
@@ -219,7 +226,7 @@ export const useAccountStore = defineStore('account', () => {
         timeout: 10_000,
         retry: 0,
         headers: { 'x-qr-sign-trace-id': traceId },
-        body: { uid, courseId, activityId, enc, code, url: link },
+        body: { uid, courseId, activityId, enc, code, url: link, location: location ?? undefined },
       })
       console.info(`[qr-code-sign][${traceId}] 客户端收到响应`, { code: response?.code, elapsedMs: Date.now() - startedAt })
     }

@@ -2,6 +2,7 @@
 import { useQRCode } from '@vueuse/integrations/useQRCode'
 import { QrcodeCapture, QrcodeDropZone, QrcodeStream } from 'vue-qrcode-reader'
 import { createQrCodeSubmissionGuard, parseQrCodeSignLink } from '~/utils/qrCodeSign'
+import { clientLocationStatus, requestQrModalLocationOnce } from '~/utils/clientLocation.client'
 
 export interface DetectedBarcode {
   boundingBox: BoundingBox
@@ -28,7 +29,7 @@ const props = withDefaults(defineProps<{
   title?: string
   loading?: boolean
   retryFailedAvailable?: boolean
-  waitForSecondUrl?: boolean
+  waitForSecondUrl?: number | string
 }>(), {
   loading: false,
   retryFailedAvailable: false,
@@ -46,21 +47,30 @@ const runtimeConfig = typeof useRuntimeConfig === 'function'
 const text = ref('')
 const showScan = ref(false)
 const cameraReady = ref(false)
+const rearCameras = ref<{ deviceId: string; label: string }[]>([])
+const selectedCameraId = ref<string | null>(null)
+const activeCameraId = ref<string | null>(null)
 const scanLocked = ref(false)
 const errorMessage = ref('')
 const lastInvalidCode = ref('')
 const pendingDetectedLink = ref<string | null>(null)
+const scannerContainer = ref<HTMLElement>()
 const captureContainer = ref<HTMLElement>()
 const submissionGuard = createQrCodeSubmissionGuard()
 let pendingDetectedTimer: ReturnType<typeof setTimeout> | undefined
+let cameraListRequest = 0
 
-const waitForSecondUrl = computed(() => {
-  if (props.waitForSecondUrl !== undefined)
-    return props.waitForSecondUrl
-
-  const value = runtimeConfig.public.qrCode?.waitForSecondUrl
-  return value !== false && value !== 'false'
+const waitForSecondUrlSeconds = computed(() => {
+  const value = props.waitForSecondUrl ?? runtimeConfig.public.qrCode?.waitForSecondUrl
+  const seconds = Number(value)
+  return Number.isFinite(seconds) && seconds > 0 ? seconds : 0
 })
+
+const cameraConstraints = computed<MediaTrackConstraints>(() => selectedCameraId.value
+  ? { deviceId: { exact: selectedCameraId.value } }
+  : { facingMode: { ideal: 'environment' } })
+
+const rearCameraIndex = computed(() => rearCameras.value.findIndex(camera => camera.deviceId === activeCameraId.value))
 
 const qrcode = useQRCode(text, {
   errorCorrectionLevel: 'H',
@@ -94,6 +104,49 @@ function clearPendingDetectedLink() {
   pendingDetectedLink.value = null
 }
 
+function resetCameraSelection() {
+  cameraListRequest++
+  rearCameras.value = []
+  selectedCameraId.value = null
+  activeCameraId.value = null
+}
+
+function isRearCameraLabel(label: string): boolean {
+  return /\b(back|rear|environment)\b|后置|後置|背面|背部|后摄|後鏡/i.test(label)
+    && !/\b(front|user|facetime)\b|前置|前鏡|自拍/i.test(label)
+}
+
+async function refreshRearCameras(requestId: number) {
+  if (!navigator.mediaDevices?.enumerateDevices)
+    return
+
+  try {
+    const devices = await navigator.mediaDevices.enumerateDevices()
+    if (requestId !== cameraListRequest || !showScan.value)
+      return
+
+    const video = scannerContainer.value?.querySelector('video')
+    const track = (video?.srcObject as MediaStream | null)?.getVideoTracks()[0]
+    const settings = track?.getSettings()
+    const cameras = devices
+      .filter(device => device.kind === 'videoinput' && device.deviceId && isRearCameraLabel(device.label))
+      .map(device => ({ deviceId: device.deviceId, label: device.label }))
+
+    // An active environment camera can have a generic label on some browsers.
+    if (settings?.facingMode === 'environment' && settings.deviceId && !cameras.some(camera => camera.deviceId === settings.deviceId))
+      cameras.unshift({ deviceId: settings.deviceId, label: '' })
+
+    rearCameras.value = cameras
+    activeCameraId.value = settings?.deviceId
+      || cameras.find(camera => camera.label && camera.label === track?.label)?.deviceId
+      || selectedCameraId.value
+  }
+  catch {
+    if (requestId === cameraListRequest)
+      rearCameras.value = []
+  }
+}
+
 function acceptQrCode(value: string) {
   const link = value.trim()
 
@@ -116,6 +169,7 @@ function acceptQrCode(value: string) {
   scanLocked.value = true
   showScan.value = false
   cameraReady.value = false
+  resetCameraSelection()
   text.value = result.value.link
   emit('success', result.value.link)
 }
@@ -126,7 +180,7 @@ function submitQrCode(value: string, waitForSecond = false) {
   if (props.loading)
     return
 
-  if (waitForSecond && waitForSecondUrl.value) {
+  if (waitForSecond && waitForSecondUrlSeconds.value > 0) {
     const parsed = parseQrCodeSignLink(link)
     if (!parsed) {
       if (link && link !== lastInvalidCode.value) {
@@ -144,7 +198,7 @@ function submitQrCode(value: string, waitForSecond = false) {
         clearPendingDetectedLink()
         if (firstLink)
           acceptQrCode(firstLink)
-      }, 12_000)
+      }, waitForSecondUrlSeconds.value * 1000)
       return
     }
 
@@ -167,6 +221,7 @@ function handleScan() {
   if (showScan.value) {
     showScan.value = false
     cameraReady.value = false
+    resetCameraSelection()
     return
   }
 
@@ -180,12 +235,30 @@ function handleScan() {
   submissionGuard.reset()
   scanLocked.value = false
   cameraReady.value = false
+  resetCameraSelection()
   showScan.value = true
+}
+
+function switchCamera() {
+  if (!showScan.value || !cameraReady.value || props.loading || rearCameras.value.length < 2)
+    return
+
+  const nextIndex = (rearCameraIndex.value + 1) % rearCameras.value.length
+  const nextCamera = rearCameras.value[nextIndex]
+  if (!nextCamera)
+    return
+
+  cameraListRequest++
+  clearPendingDetectedLink()
+  lastInvalidCode.value = ''
+  cameraReady.value = false
+  selectedCameraId.value = nextCamera.deviceId
 }
 
 function onCameraOn() {
   cameraReady.value = true
   errorMessage.value = ''
+  void refreshRearCameras(++cameraListRequest)
 }
 
 function onError(error: { name?: string }) {
@@ -203,6 +276,7 @@ function onError(error: { name?: string }) {
   errorMessage.value = errorMessages[error.name ?? ''] ?? `相机错误（${error.name ?? '未知错误'}）！`
   cameraReady.value = false
   showScan.value = false
+  resetCameraSelection()
   ms.error(errorMessage.value)
 }
 
@@ -214,6 +288,7 @@ function onDetect(detectedCodes: DetectedBarcode[]) {
 }
 
 function handleOpen() {
+  void requestQrModalLocationOnce()
   text.value = ''
   errorMessage.value = ''
   lastInvalidCode.value = ''
@@ -221,6 +296,7 @@ function handleOpen() {
   submissionGuard.reset()
   scanLocked.value = false
   cameraReady.value = false
+  resetCameraSelection()
   showScan.value = true
 }
 
@@ -228,6 +304,7 @@ function handleClose() {
   clearPendingDetectedLink()
   showScan.value = false
   cameraReady.value = false
+  resetCameraSelection()
   scanLocked.value = false
   errorMessage.value = ''
   lastInvalidCode.value = ''
@@ -240,6 +317,7 @@ function handleUpload() {
 
   showScan.value = false
   cameraReady.value = false
+  resetCameraSelection()
   scanLocked.value = false
   clearPendingDetectedLink()
   submissionGuard.reset()
@@ -277,6 +355,9 @@ function handleUpload() {
           重新扫描将自动选取失败账号
         </span>
       </div>
+      <n-button v-if="showScan && rearCameras.length > 1" :disabled="loading || !cameraReady" @click="switchCamera">
+        后置镜头切换{{ rearCameraIndex >= 0 ? ` (${rearCameraIndex + 1}/${rearCameras.length})` : '' }}
+      </n-button>
       <n-button :disabled="loading" @click="handleUpload">
         选择图片
       </n-button>
@@ -288,12 +369,18 @@ function handleUpload() {
     <n-text class="scan-status" :type="errorMessage ? 'error' : 'info'">
       {{ scanStatus }}
     </n-text>
+    <n-text v-if="clientLocationStatus === 'unavailable'" class="scan-status" type="warning">
+      定位不可用；扫码将使用默认坐标，要求位置的签到可能失败。
+    </n-text>
+    <n-text v-else-if="clientLocationStatus === 'loading'" class="scan-status" type="info">
+      正在读取网页位置；扫码提交会等待定位结果。
+    </n-text>
     <slot name="result" />
 
-    <div class="w-full aspect-1 border-1 transition hover:(border-1 border-green border-dotted)">
+    <div ref="scannerContainer" class="w-full aspect-1 border-1 transition hover:(border-1 border-green border-dotted)">
       <QrcodeStream
         v-if="showScan"
-        :constraints="{ facingMode: { ideal: 'environment' } }"
+        :constraints="cameraConstraints"
         class="bg-black/20"
         @camera-on="onCameraOn"
         @error="onError"

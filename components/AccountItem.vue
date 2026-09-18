@@ -3,6 +3,7 @@ import { useDateFormat } from '@vueuse/core'
 import { SignTypeEnum } from '~/constants/cx'
 import { formatQrCodeFeedbackTime, qrCodeRequestError } from '~/utils/qrCodeSign'
 import { connectQrSignEvents } from '~/utils/qrSignEvents.client'
+import { getClientLocationForQr } from '~/utils/clientLocation.client'
 import type { QrJobView, QrStreamSnapshot, QrSubmitDecision } from '~/utils/qrSignProtocol'
 import type { RecentSign } from '~/types/recentSign'
 
@@ -147,7 +148,8 @@ async function handleQrCodeSignSuccess(result: string) {
   qrCodeLoading.value = true
 
   try {
-    const decision = await accountStore.signByQrCode(props.uid, result, doingActivity.value?.course?.courseId)
+    const location = await getClientLocationForQr()
+    const decision = await accountStore.signByQrCode(props.uid, result, doingActivity.value?.course?.courseId, undefined, location)
     if (generation === qrModalGeneration)
       applyQrDecision(decision, result, requestedActivityId)
   }
