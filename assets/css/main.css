@@ -106,12 +106,15 @@ html.dark .account-meta .account-recent-sign { color: #4ade80; }
 .add-account-button.n-button { min-height: 50px; border-radius: 16px; background: var(--mobile-surface); color: var(--mobile-muted); }
 .empty-card { padding: 28px 18px; border: 1px solid var(--mobile-border); border-radius: 18px; background: var(--mobile-surface); display: grid; gap: 20px; }
 .mobile-footer { position: fixed; z-index: 20; bottom: 0; left: 0; right: 0; padding: 8px 16px calc(8px + env(safe-area-inset-bottom, 0px)); background: var(--mobile-surface); border-top: 1px solid var(--mobile-border); box-shadow: 0 -6px 24px rgba(24, 30, 44, 0.04); }
-.batch-selection { display: flex; align-items: center; justify-content: flex-start; gap: 10px; min-height: 36px; margin-bottom: 4px; }
+.batch-selection { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-start; gap: 10px; min-height: 36px; margin-bottom: 4px; }
 .batch-selection > span { font-size: 12px; color: var(--mobile-muted); }
-.batch-selection > span:first-child { margin-right: auto; }
+.batch-selection-count { margin-right: 0; }
 .batch-selection strong { color: var(--primary-color); }
 .batch-select-label { cursor: pointer; }
 .batch-selection .n-checkbox { min-height: 36px; align-items: center; }
+.dynamic-code-toggle { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; margin-right: auto; color: var(--mobile-muted); font-size: 12px; cursor: pointer; user-select: none; }
+.dynamic-code-toggle__state { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 26px; border: 1px solid var(--mobile-border); border-radius: 8px; background: var(--mobile-surface); color: var(--mobile-muted); font-size: 12px; font-weight: 600; }
+.dynamic-code-toggle__state--active { border-color: #18a058; background: #18a058; color: #fff; }
 .mobile-footer .primary-actions { grid-template-columns: minmax(0, 1fr); margin-top: 4px; }
 html[data-mobile-keyboard="open"] .mobile-footer { visibility: hidden; }
 .course-heading { margin-top: 24px; }

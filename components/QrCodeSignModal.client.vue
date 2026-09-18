@@ -29,9 +29,10 @@ const props = withDefaults(defineProps<{
   title?: string
   loading?: boolean
   retryFailedAvailable?: boolean
-  waitForSecondUrl?: number | string
+  dynamicRefreshCode?: boolean
 }>(), {
   loading: false,
+  dynamicRefreshCode: false,
   retryFailedAvailable: false,
 })
 
@@ -41,9 +42,6 @@ const emit = defineEmits<{
 }>()
 
 const ms = useMessage()
-const runtimeConfig = typeof useRuntimeConfig === 'function'
-  ? useRuntimeConfig()
-  : { public: {} }
 const text = ref('')
 const showScan = ref(false)
 const cameraReady = ref(false)
@@ -59,12 +57,6 @@ const captureContainer = ref<HTMLElement>()
 const submissionGuard = createQrCodeSubmissionGuard()
 let pendingDetectedTimer: ReturnType<typeof setTimeout> | undefined
 let cameraListRequest = 0
-
-const waitForSecondUrlSeconds = computed(() => {
-  const value = props.waitForSecondUrl ?? runtimeConfig.public.qrCode?.waitForSecondUrl
-  const seconds = Number(value)
-  return Number.isFinite(seconds) && seconds > 0 ? seconds : 0
-})
 
 const cameraConstraints = computed<MediaTrackConstraints>(() => selectedCameraId.value
   ? { deviceId: { exact: selectedCameraId.value } }
@@ -180,7 +172,7 @@ function submitQrCode(value: string, waitForSecond = false) {
   if (props.loading)
     return
 
-  if (waitForSecond && waitForSecondUrlSeconds.value > 0) {
+  if (waitForSecond && props.dynamicRefreshCode) {
     const parsed = parseQrCodeSignLink(link)
     if (!parsed) {
       if (link && link !== lastInvalidCode.value) {
@@ -198,7 +190,7 @@ function submitQrCode(value: string, waitForSecond = false) {
         clearPendingDetectedLink()
         if (firstLink)
           acceptQrCode(firstLink)
-      }, waitForSecondUrlSeconds.value * 1000)
+      }, 30_000)
       return
     }
 

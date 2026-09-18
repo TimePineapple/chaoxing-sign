@@ -50,6 +50,7 @@ interface QrFeedback {
 const qrCodeResults = ref<QrFeedback[]>([])
 const showQrCodeModal = ref(false)
 const showCodeOrGestureModal = ref(false)
+const dynamicRefreshCode = ref(false)
 const retryFailedAvailable = ref(false)
 const autoSelectFailedOnRetry = computed(() => {
   const value = runtimeConfig.public.qrCode?.autoSelectFailedOnRetry
@@ -297,7 +298,19 @@ async function handleCodeOrGestureSignSuccess(result: string) {
 <template>
   <footer class="mobile-footer" role="region" aria-label="批量操作">
     <div class="batch-selection">
-      <span>已选 <strong>{{ selectAccounts.length }}</strong> 个账号</span>
+      <div
+        class="dynamic-code-toggle"
+        role="checkbox"
+        tabindex="0"
+        :aria-checked="dynamicRefreshCode"
+        @click.stop="dynamicRefreshCode = !dynamicRefreshCode"
+        @keydown.enter.prevent.stop="dynamicRefreshCode = !dynamicRefreshCode"
+        @keydown.space.prevent.stop="dynamicRefreshCode = !dynamicRefreshCode"
+      >
+        <span class="dynamic-code-toggle__state" :class="{ 'dynamic-code-toggle__state--active': dynamicRefreshCode }">{{ dynamicRefreshCode ? '是' : '否' }}</span>
+        <span>是否为动态刷新码</span>
+      </div>
+      <span class="batch-selection-count">已选 <strong>{{ selectAccounts.length }}</strong> 个账号</span>
       <span class="batch-select-label" role="button" tabindex="0" @click.stop="toggleAllChecked" @keydown.enter.stop="toggleAllChecked" @keydown.space.prevent.stop="toggleAllChecked">全选</span>
       <n-checkbox v-model:checked="isAllChecked" :indeterminate="indeterminate" size="large" aria-label="全选" @update:checked="handleCheckedChange" />
     </div>
@@ -307,7 +320,7 @@ async function handleCodeOrGestureSignSuccess(result: string) {
         批量扫码
       </n-button>
     </div>
-    <QrCodeSignModal v-model:show="showQrCodeModal" :title="doingActivity?.course?.name ?? '批量扫码'" :loading="qrCodeLoading" :retry-failed-available="retryFailedAvailable" @success="handleSuccess" @retry-failed="handleRetryFailed">
+    <QrCodeSignModal v-model:show="showQrCodeModal" :title="doingActivity?.course?.name ?? '批量扫码'" :loading="qrCodeLoading" :dynamic-refresh-code="dynamicRefreshCode" :retry-failed-available="retryFailedAvailable" @success="handleSuccess" @retry-failed="handleRetryFailed">
       <template #result>
         <ul v-if="qrCodeResults.length" aria-label="各账号扫码结果" class="mb-3">
           <li v-for="item in qrCodeResults" :key="item.uid">
