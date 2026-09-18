@@ -1,3 +1,8 @@
+<script setup lang="ts">
+const route = useRoute()
+const showFooter = computed(() => route.path !== '/auth/login')
+</script>
+
 <template>
   <div class="app-layout">
     <AppHeader />
@@ -5,7 +10,7 @@
       <slot />
     </main>
     <AppPwaInstall />
-    <AppFooter />
+    <AppFooter v-if="showFooter" />
   </div>
 </template>
 
