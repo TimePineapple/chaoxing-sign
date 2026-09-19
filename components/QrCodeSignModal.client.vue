@@ -402,6 +402,16 @@ function handleUpload() {
     <slot name="result" />
 
     <div ref="scannerContainer" class="qr-scanner w-full aspect-1 border-1 transition hover:(border-1 border-green border-dotted)">
+      <div
+        v-if="pendingDetectedLink"
+        class="dynamic-code-waiting-hint"
+        role="status"
+        aria-live="polite"
+        data-testid="dynamic-code-waiting-hint"
+      >
+        正在等待二维码刷新
+      </div>
+
       <QrcodeStream
         v-if="showScan && queueOverlay === 'none'"
         :constraints="cameraConstraints"
@@ -456,6 +466,23 @@ function handleUpload() {
 .qr-scanner {
   position: relative;
   overflow: hidden;
+}
+
+.dynamic-code-waiting-hint {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  right: 12px;
+  z-index: 3;
+  color: #2080f0;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.4;
+  text-align: center;
+  text-shadow:
+    0 1px 2px rgb(255 255 255 / 95%),
+    0 0 5px rgb(255 255 255 / 90%);
+  pointer-events: none;
 }
 
 .qr-queue-overlay {

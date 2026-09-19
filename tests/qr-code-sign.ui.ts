@@ -64,7 +64,7 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-it('shows batch failures inside the real modal after a video detection event', async () => {
+it('shows the dynamic-code waiting hint and batch failures inside the real modal', async () => {
   let locationRequests = 0
   Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: {
     enumerateDevices: vi.fn().mockResolvedValue([
@@ -117,6 +117,8 @@ it('shows batch failures inside the real modal after a video detection event', a
   app.mount(container)
   const buttons = () => [...document.querySelectorAll<HTMLButtonElement>('button')]
   const requestsBeforeOpening = locationRequests
+  document.querySelector<HTMLElement>('.dynamic-code-toggle')!.click()
+  await Vue.nextTick()
   buttons().find(button => button.textContent?.includes('批量扫码'))!.click()
   await vi.waitFor(() => expect(document.querySelector('[data-testid="camera-frame"]')).not.toBeNull())
   await vi.waitFor(() => expect(locationRequests).toBeGreaterThan(requestsBeforeOpening))
@@ -129,6 +131,12 @@ it('shows batch failures inside the real modal after a video detection event', a
     await vi.waitFor(() => expect(switchButton()?.disabled).toBe(false))
   }
   expect(document.querySelector('[data-testid="camera-frame"]')?.getAttribute('data-device-id')).not.toBe('front')
+  document.querySelector<HTMLButtonElement>('[data-testid="camera-frame"]')!.click()
+  await vi.waitFor(() => expect(document.querySelector('[data-testid="dynamic-code-waiting-hint"]')?.textContent?.trim()).toBe('正在等待二维码刷新'))
+  switchButton()!.click()
+  await vi.waitFor(() => expect(document.querySelector('[data-testid="dynamic-code-waiting-hint"]')).toBeNull())
+  document.querySelector<HTMLElement>('.dynamic-code-toggle')!.click()
+  await Vue.nextTick()
   const requestsBeforeSubmit = locationRequests
   document.querySelector<HTMLButtonElement>('[data-testid="camera-frame"]')!.click()
   await vi.waitFor(() => expect(document.querySelector('[aria-label="各账号扫码结果"]')?.textContent).toContain('模拟：登录已过期'))
