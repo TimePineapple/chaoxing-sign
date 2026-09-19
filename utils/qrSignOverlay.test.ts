@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { QrSignOverlayTracker } from './qrSignOverlay'
+import { qrSignScannerCovered, qrSignSubmissionAllowed, QrSignOverlayTracker } from './qrSignOverlay'
 import type { QrJobView } from './qrSignProtocol'
 
 const now = new Date('2026-01-01T12:00:00.000Z').getTime()
@@ -9,6 +9,14 @@ function job(uid: string, state: QrJobView['state'], clientId: string, id = uid)
 }
 
 describe('QR scanner overlay', () => {
+  it('keeps the scanner visible but suppresses submission while another client runs', () => {
+    expect(qrSignScannerCovered('waiting')).toBe(false)
+    expect(qrSignSubmissionAllowed('waiting')).toBe(false)
+    expect(qrSignScannerCovered('completed')).toBe(true)
+    expect(qrSignSubmissionAllowed('completed')).toBe(false)
+    expect(qrSignSubmissionAllowed('none')).toBe(true)
+  })
+
   it('waits only for selected jobs submitted by another client', () => {
     const tracker = new QrSignOverlayTracker()
     tracker.applySnapshot({ active: [job('a', 'queued', 'primary')], recentSuccess: [] }, now)

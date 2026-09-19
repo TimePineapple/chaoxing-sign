@@ -1,5 +1,8 @@
 import { randomUUID } from 'node:crypto'
 import type { QrJobEvent, QrJobView, QrStreamSnapshot, QrSubmitDecision } from '~/utils/qrSignProtocol'
+import { randomCxRequestIntervalMs } from './cxRequestInterval'
+
+type IntervalSource = number | (() => number)
 
 interface Job extends QrJobView {
   ownerId: string
@@ -35,7 +38,11 @@ export class QrSignQueue {
   private lastStartedAt = 0
   private timer: ReturnType<typeof setTimeout> | undefined
 
-  constructor(private readonly intervalMs = 150, private readonly timeoutMs = 45_000) {}
+  constructor(private readonly intervalSource: IntervalSource = randomCxRequestIntervalMs, private readonly timeoutMs = 45_000) {}
+
+  private nextIntervalMs() {
+    return typeof this.intervalSource === 'function' ? this.intervalSource() : this.intervalSource
+  }
 
   private prune() {
     const now = Date.now()
@@ -87,7 +94,9 @@ export class QrSignQueue {
   private schedule() {
     if (this.timer || !this.waiting.length)
       return
-    const waitMs = Math.max(0, this.lastStartedAt + this.intervalMs - Date.now())
+    const waitMs = this.lastStartedAt
+      ? Math.max(0, this.lastStartedAt + this.nextIntervalMs() - Date.now())
+      : 0
     this.timer = setTimeout(() => {
       this.timer = undefined
       const job = this.waiting.shift()

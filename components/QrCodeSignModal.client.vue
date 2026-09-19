@@ -3,7 +3,7 @@ import { useQRCode } from '@vueuse/integrations/useQRCode'
 import { QrcodeCapture, QrcodeDropZone, QrcodeStream } from 'vue-qrcode-reader'
 import { createQrCodeSubmissionGuard, parseQrCodeSignLink } from '~/utils/qrCodeSign'
 import { clientLocationStatus, requestQrModalLocationOnce } from '~/utils/clientLocation.client'
-import type { QrSignOverlayMode } from '~/utils/qrSignOverlay'
+import { qrSignScannerCovered, qrSignSubmissionAllowed, type QrSignOverlayMode } from '~/utils/qrSignOverlay'
 
 export interface DetectedBarcode {
   boundingBox: BoundingBox
@@ -52,6 +52,7 @@ const rearCameras = ref<{ deviceId: string; label: string }[]>([])
 const selectedCameraId = ref<string | null>(null)
 const activeCameraId = ref<string | null>(null)
 const scanLocked = ref(false)
+const silentlyCaptured = ref(false)
 const errorMessage = ref('')
 const lastInvalidCode = ref('')
 const pendingDetectedLink = ref<string | null>(null)
@@ -66,6 +67,8 @@ const cameraConstraints = computed<MediaTrackConstraints>(() => selectedCameraId
   : { facingMode: { ideal: 'environment' } })
 
 const rearCameraIndex = computed(() => rearCameras.value.findIndex(camera => camera.deviceId === activeCameraId.value))
+const scannerCovered = computed(() => qrSignScannerCovered(props.queueOverlay))
+const submissionLocked = computed(() => scanLocked.value || silentlyCaptured.value)
 
 const qrcode = useQRCode(text, {
   errorCorrectionLevel: 'H',
@@ -78,8 +81,6 @@ const qrcode = useQRCode(text, {
 })
 
 const scanStatus = computed(() => {
-  if (props.queueOverlay === 'waiting')
-    return '请等待其他客户端执行'
   if (props.queueOverlay === 'completed')
     return '此次签到已由其他客户端完成'
   if (props.loading)
@@ -104,7 +105,7 @@ function clearPendingDetectedLink() {
 }
 
 watch(() => props.queueOverlay, (mode) => {
-  if (mode === 'none')
+  if (!qrSignScannerCovered(mode))
     return
   clearPendingDetectedLink()
   showScan.value = false
@@ -165,7 +166,7 @@ async function refreshRearCameras(requestId: number) {
 function acceptQrCode(value: string) {
   const link = value.trim()
 
-  if (props.loading || props.queueOverlay !== 'none')
+  if (props.loading || scannerCovered.value)
     return
 
   const result = submissionGuard.tryLock(link)
@@ -186,13 +187,18 @@ function acceptQrCode(value: string) {
   cameraReady.value = false
   resetCameraSelection()
   text.value = result.value.link
+  if (!qrSignSubmissionAllowed(props.queueOverlay)) {
+    silentlyCaptured.value = true
+    return
+  }
+  silentlyCaptured.value = false
   emit('success', result.value.link)
 }
 
 function submitQrCode(value: string, waitForSecond = false) {
   const link = value.trim()
 
-  if (props.loading || props.queueOverlay !== 'none')
+  if (props.loading || scannerCovered.value)
     return
 
   if (waitForSecond && props.dynamicRefreshCode) {
@@ -230,7 +236,7 @@ function submitQrCode(value: string, waitForSecond = false) {
 }
 
 function handleScan() {
-  if (props.loading || props.queueOverlay !== 'none')
+  if (props.loading || scannerCovered.value)
     return
 
   if (showScan.value) {
@@ -243,7 +249,8 @@ function handleScan() {
   if (props.retryFailedAvailable)
     emit('retry-failed')
 
-  void requestQrModalLocationOnce()
+  if (qrSignSubmissionAllowed(props.queueOverlay))
+    void requestQrModalLocationOnce()
 
   text.value = ''
   errorMessage.value = ''
@@ -251,13 +258,14 @@ function handleScan() {
   clearPendingDetectedLink()
   submissionGuard.reset()
   scanLocked.value = false
+  silentlyCaptured.value = false
   cameraReady.value = false
   resetCameraSelection()
   showScan.value = true
 }
 
 function switchCamera() {
-  if (!showScan.value || !cameraReady.value || props.loading || props.queueOverlay !== 'none' || rearCameras.value.length < 2)
+  if (!showScan.value || !cameraReady.value || props.loading || scannerCovered.value || rearCameras.value.length < 2)
     return
 
   const nextIndex = (rearCameraIndex.value + 1) % rearCameras.value.length
@@ -273,7 +281,7 @@ function switchCamera() {
 }
 
 function onCameraOn() {
-  if (props.queueOverlay !== 'none')
+  if (scannerCovered.value)
     return
   cameraReady.value = true
   errorMessage.value = ''
@@ -281,7 +289,7 @@ function onCameraOn() {
 }
 
 function onError(error: { name?: string }) {
-  if (props.queueOverlay !== 'none')
+  if (scannerCovered.value)
     return
   const errorMessages: Record<string, string> = {
     NotAllowedError: '您需要授予相机访问权限！',
@@ -302,7 +310,7 @@ function onError(error: { name?: string }) {
 }
 
 function onDetect(detectedCodes: DetectedBarcode[]) {
-  if (props.queueOverlay !== 'none')
+  if (scannerCovered.value)
     return
   const rawValue = detectedCodes.find(code => code.rawValue.trim())?.rawValue
 
@@ -311,7 +319,7 @@ function onDetect(detectedCodes: DetectedBarcode[]) {
 }
 
 function handleOpen() {
-  if (props.queueOverlay === 'none')
+  if (qrSignSubmissionAllowed(props.queueOverlay))
     void requestQrModalLocationOnce()
   text.value = ''
   errorMessage.value = ''
@@ -319,9 +327,10 @@ function handleOpen() {
   clearPendingDetectedLink()
   submissionGuard.reset()
   scanLocked.value = false
+  silentlyCaptured.value = false
   cameraReady.value = false
   resetCameraSelection()
-  showScan.value = props.queueOverlay === 'none'
+  showScan.value = !scannerCovered.value
 }
 
 function handleClose() {
@@ -330,19 +339,21 @@ function handleClose() {
   cameraReady.value = false
   resetCameraSelection()
   scanLocked.value = false
+  silentlyCaptured.value = false
   errorMessage.value = ''
   lastInvalidCode.value = ''
   submissionGuard.reset()
 }
 
 function handleUpload() {
-  if (props.loading || props.queueOverlay !== 'none')
+  if (props.loading || scannerCovered.value)
     return
 
   showScan.value = false
   cameraReady.value = false
   resetCameraSelection()
   scanLocked.value = false
+  silentlyCaptured.value = false
   clearPendingDetectedLink()
   submissionGuard.reset()
 
@@ -369,7 +380,7 @@ function handleUpload() {
   >
     <n-space class="mb-2">
       <div class="scan-action">
-        <n-button type="info" :disabled="loading || queueOverlay !== 'none'" @click="handleScan">
+        <n-button type="info" :disabled="loading || scannerCovered" @click="handleScan">
           {{ showScan ? '关闭摄像头' : '重新扫描' }}
         </n-button>
         <span
@@ -379,13 +390,13 @@ function handleUpload() {
           重新扫描将自动选取失败账号
         </span>
       </div>
-      <n-button v-if="showScan && rearCameras.length > 1" :disabled="loading || queueOverlay !== 'none' || !cameraReady" @click="switchCamera">
+      <n-button v-if="showScan && rearCameras.length > 1" :disabled="loading || scannerCovered || !cameraReady" @click="switchCamera">
         后置镜头切换{{ rearCameraIndex >= 0 ? ` (${rearCameraIndex + 1}/${rearCameras.length})` : '' }}
       </n-button>
-      <n-button :disabled="loading || queueOverlay !== 'none'" @click="handleUpload">
+      <n-button :disabled="loading || scannerCovered" @click="handleUpload">
         选择图片
       </n-button>
-      <n-button v-if="text" type="error" :disabled="loading || queueOverlay !== 'none'" @click="text = ''">
+      <n-button v-if="text" type="error" :disabled="loading || scannerCovered" @click="text = ''">
         清除
       </n-button>
     </n-space>
@@ -413,7 +424,7 @@ function handleUpload() {
       </div>
 
       <QrcodeStream
-        v-if="showScan && queueOverlay === 'none'"
+        v-if="showScan && !scannerCovered"
         :constraints="cameraConstraints"
         class="bg-black/20"
         @camera-on="onCameraOn"
@@ -424,7 +435,7 @@ function handleUpload() {
       <n-image v-else-if="qrcode && scanLocked" :src="qrcode" />
 
       <QrcodeDropZone
-        v-else-if="queueOverlay === 'none'"
+        v-else-if="!scannerCovered"
         class="flex flex-col justify-center items-center h-full w-full cursor-pointer"
         @detect="onDetect"
         @click="handleUpload"
@@ -437,8 +448,8 @@ function handleUpload() {
         </n-text>
       </QrcodeDropZone>
 
-      <div v-if="queueOverlay !== 'none'" class="qr-queue-overlay" :class="{ 'qr-queue-overlay--with-code': qrcode && scanLocked }" role="status">
-        <span>{{ queueOverlay === 'waiting' ? '请等待其他客户端执行' : '此次签到已由其他客户端完成' }}</span>
+      <div v-if="queueOverlay === 'completed'" class="qr-queue-overlay" :class="{ 'qr-queue-overlay--with-code': qrcode && scanLocked }" role="status">
+        <span>此次签到已由其他客户端完成</span>
       </div>
 
       <div ref="captureContainer" class="hidden">
@@ -448,12 +459,12 @@ function handleUpload() {
 
     <span>若有签到链接，可直接在下方输入</span>
     <div class="qr-url-actions">
-      <n-input class="qr-url-input" v-model:value="text" placeholder="签到链接" clearable :disabled="loading || queueOverlay !== 'none'" />
+      <n-input class="qr-url-input" v-model:value="text" placeholder="签到链接" clearable :disabled="loading || scannerCovered" />
       <n-button
         class="qr-url-submit"
         type="primary"
         :loading="loading"
-        :disabled="queueOverlay !== 'none' || !text.trim() || scanLocked"
+        :disabled="scannerCovered || !text.trim() || submissionLocked"
         @click="submitQrCode(text)"
       >
         签到

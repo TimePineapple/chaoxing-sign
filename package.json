@@ -1,6 +1,6 @@
 {
   "name": "chaoxing-sign",
-  "version": "1.4.3",
+  "version": "1.4.5",
   "footerConfig": {
     "githubUrl": "https://github.com/TimePineapple/chaoxing-sign",
     "buildText": "nuxt@3.14.1592",

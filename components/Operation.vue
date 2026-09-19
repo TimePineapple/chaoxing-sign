@@ -5,6 +5,7 @@ import { connectQrSignEvents } from '~/utils/qrSignEvents.client'
 import { getClientLocationForQr } from '~/utils/clientLocation.client'
 import { isOtherQrSignClient } from '~/utils/qrSignClient.client'
 import { qrJobFeedbackMessage, qrJobFeedbackTime } from '~/utils/qrSignFeedback'
+import { qrSignSubmissionAllowed } from '~/utils/qrSignOverlay'
 import { useQrSignOverlay } from '~/utils/useQrSignOverlay.client'
 import type { QrJobView, QrStreamSnapshot, QrSubmitDecision } from '~/utils/qrSignProtocol'
 
@@ -208,7 +209,7 @@ function handleRetryFailed() {
 }
 
 async function handleSuccess(result: string) {
-  if (qrCodeLoading.value)
+  if (qrCodeLoading.value || !qrSignSubmissionAllowed(qrOverlayMode.value))
     return
 
   const toAccounts = [...unref(selectAccounts)]

@@ -15,8 +15,8 @@ describe('server-wide QR queue', () => {
   })
   afterEach(() => vi.useRealTimers())
 
-  it('claims a UID while queued and starts unrelated jobs 150ms apart without awaiting results', async () => {
-    const queue = new QrSignQueue()
+  it('claims a UID while queued and starts unrelated jobs at the sampled interval without awaiting results', async () => {
+    const queue = new QrSignQueue(75)
     const first = deferred<{ result: string }>()
     const second = deferred<{ result: string }>()
     const starts: number[] = []
@@ -36,10 +36,10 @@ describe('server-wide QR queue', () => {
     expect(duplicate).not.toHaveBeenCalled()
     await vi.advanceTimersByTimeAsync(0)
     expect(starts).toHaveLength(1)
-    await vi.advanceTimersByTimeAsync(149)
+    await vi.advanceTimersByTimeAsync(74)
     expect(starts).toHaveLength(1)
     await vi.advanceTimersByTimeAsync(1)
-    expect(starts[1] - starts[0]).toBe(150)
+    expect(starts[1] - starts[0]).toBe(75)
     expect(queue.snapshot('web-a').active).toHaveLength(1)
     expect(queue.snapshot('web-b').active).toHaveLength(1)
     first.resolve({ result: '签到成功' })
@@ -68,7 +68,7 @@ describe('server-wide QR queue', () => {
     expect(again).toMatchObject({ state: 'accepted' })
     expect(again.job.id).not.toBe(accepted.job.id)
     expect(run).toHaveBeenCalledTimes(1)
-    await vi.advanceTimersByTimeAsync(150)
+    await vi.advanceTimersByTimeAsync(100)
     expect(run).toHaveBeenCalledTimes(2)
   })
 
@@ -80,7 +80,7 @@ describe('server-wide QR queue', () => {
     const again = queue.submit({ ownerId: 'web-a', uid: 'cx-a', activityId: '10', run })
     expect(again.state).toBe('accepted')
     expect(run).toHaveBeenCalledTimes(1)
-    await vi.advanceTimersByTimeAsync(150)
+    await vi.advanceTimersByTimeAsync(100)
     expect(run).toHaveBeenCalledTimes(2)
   })
 
@@ -152,7 +152,7 @@ describe('server-wide QR queue', () => {
   })
 
   it('times out 45 seconds after execution starts, aborts, publishes uncertainty and releases UID', async () => {
-    const queue = new QrSignQueue(150, 45_000)
+    const queue = new QrSignQueue(75, 45_000)
     const signals: AbortSignal[] = []
     const run = vi.fn((signal: AbortSignal) => {
       signals.push(signal)

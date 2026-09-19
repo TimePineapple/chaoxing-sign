@@ -6,6 +6,7 @@ import { connectQrSignEvents } from '~/utils/qrSignEvents.client'
 import { getClientLocationForQr } from '~/utils/clientLocation.client'
 import { isOtherQrSignClient } from '~/utils/qrSignClient.client'
 import { qrJobFeedbackMessage, qrJobFeedbackTime } from '~/utils/qrSignFeedback'
+import { qrSignSubmissionAllowed } from '~/utils/qrSignOverlay'
 import { useQrSignOverlay } from '~/utils/useQrSignOverlay.client'
 import type { QrJobView, QrStreamSnapshot, QrSubmitDecision } from '~/utils/qrSignProtocol'
 import type { RecentSign } from '~/types/recentSign'
@@ -174,7 +175,7 @@ function applyQrDecision(decision: QrSubmitDecision, url: string, requestedActiv
 }
 
 async function handleQrCodeSignSuccess(result: string) {
-  if (qrCodeLoading.value)
+  if (qrCodeLoading.value || !qrSignSubmissionAllowed(qrOverlayMode.value))
     return
 
   const requestedActivityId = new URL(result).searchParams.get('id') || ''

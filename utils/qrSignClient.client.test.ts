@@ -18,5 +18,5 @@ it('keeps one ID per loaded page and gives a second page a different ID', async 
   expect(qrJobFeedbackMessage({
     id: 'job-1', uid: 'cx-a', activityId: '10', clientId: id,
     submittedAt: Date.now(), state: 'running', message: '正在提交',
-  }, secondPage.isOtherQrSignClient(id))).toBe('其他客户端正在提交')
+  }, secondPage.isOtherQrSignClient(id))).toBe('正在提交')
 })

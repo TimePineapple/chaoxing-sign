@@ -3,6 +3,14 @@ import type { QrJobView, QrStreamSnapshot } from './qrSignProtocol'
 export type QrSignOverlayMode = 'none' | 'waiting' | 'completed'
 const RECENT_SUCCESS_MS = 60_000
 
+export function qrSignScannerCovered(mode: QrSignOverlayMode): boolean {
+  return mode === 'completed'
+}
+
+export function qrSignSubmissionAllowed(mode: QrSignOverlayMode): boolean {
+  return mode === 'none'
+}
+
 export class QrSignOverlayTracker {
   private readonly active = new Map<string, QrJobView>()
   private readonly recentSuccess = new Map<string, QrJobView>()
