@@ -61,7 +61,7 @@ Copy-Item .env.example .env
 | `DATABASE_URL` | 是 | PostgreSQL 连接地址 |
 | `ALLOW_WEB_REGISTRATION` | 否 | 设置为 `true` 并重启后，临时开放本站账号注册 |
 | `CX_PROXY_URL` | 否 | 学习通 HTTP/HTTPS 请求代理；留空时直连 |
-| `BAIDU_MAP_SERVER_AK` | 否 | 服务端逆地理编码所需的百度地图 Web 服务 AK |
+| `BAIDU_MAP_SERVER_AK` | 否 | 服务端逆地理编码所需的百度地图 Web 服务 AK，若要使用位置签到功能，需自主前往[百度地图开发服务](https://lbs.baidu.com/)申请AK |
 | `NUXT_IM_INIT_CONNECT` | 否 | 服务启动时是否恢复自动监听连接 |
 | `NUXT_PUBLIC_QR_CODE_AUTO_SELECT_FAILED_ON_RETRY` | 否 | 重新扫描时是否自动选择上一轮失败账号 |
 
