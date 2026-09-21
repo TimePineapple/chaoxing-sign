@@ -1,134 +1,267 @@
-# 🌟某星签到(网页版)
+# 某星签到助手
 
-<a href="https://www.npmjs.com/package/nuxt/v/rc"><img alt="size" src="https://img.shields.io/github/package-json/dependency-version/kuizuo/chaoxing-sign/dev/nuxt?style=flat&colorA=002438&colorB=28CF8D"></a> <a href="https://github.com/kuizuo/chaoxing-sign/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/kuizuo/chaoxing-sign/ci.yml?style=flat&colorA=002438&colorB=28CF8D"></a>  <a href="https://github.com/kuizuo/chaoxing-sign/tree/HEAD/LICENSED"><img alt="License" src="https://img.shields.io/github/license/kuizuo/chaoxing-sign?style=flat&colorA=002438&colorB=28CF8D" /></a>
+[![CI](https://img.shields.io/github/actions/workflow/status/TimePineapple/chaoxing-sign/ci.yml?branch=main&label=CI)](https://github.com/TimePineapple/chaoxing-sign/actions/workflows/ci.yml)
+[![Nuxt](https://img.shields.io/badge/Nuxt-3.14.1592-00DC82?logo=nuxt.js)](https://nuxt.com/)
+[![License](https://img.shields.io/github/license/TimePineapple/chaoxing-sign)](./LICENSE)
 
-在这里你可以在摆脱客户端繁琐的签到流程，让签到不再是你的烦恼。
+一个基于 Nuxt 3 的自托管网页签到工具，用于管理多个学习通账号，并提供二维码识别、批量扫码、签到设置和本地签到记录等功能。
 
-## ✨功能
+> [!IMPORTANT]
+> 本项目仅供技术学习与交流。请遵守所在学校、课程和平台的相关规定，并只在获得授权的账号和服务环境中使用。
 
-- [x] 普通签到
-- [x] 拍照签到
-- [x] 位置签到
-- [x] 手势签到
-- [x] 签到码签到
-- [x] 二维码签到
-- [x] 监听签到任务,自动完成
-- [x] 支持多用户批量签到
+## 目录
 
-[更多帮助](./content/help.md)
+- [本地部署](#本地部署)
+- [生产部署：PM2 + Nginx](#生产部署pm2--nginx)
+- [部署注意事项](#部署注意事项)
+- [用户指南](#用户指南)
+- [常见问题](#常见问题)
+- [开发与维护](#开发与维护)
+- [免责声明](#免责声明)
+- [致谢与许可证](#致谢与许可证)
 
-## 🛠 运行
+## 本地部署
+
+### 环境要求
+
+- Node.js 20 或更高版本
+- pnpm 9
+- PostgreSQL
+- 可访问学习通服务的网络环境
+
+### 1. 获取项目并安装依赖
 
 ```shell
-git clone https://github.com/kuizuo/chaoxing-sign.git
+git clone https://github.com/TimePineapple/chaoxing-sign.git
 cd chaoxing-sign
 pnpm install
 ```
 
-你需要一个 PostgreSQL 数据库地址（用于存储账号信息以及自动监控签到），然后将项目根目录下 `.env.example` 文件更改成 `.env` 并替换 `DATABASE_URL` 为数据库地址(通常是远程地址)。运行如下命令用于同步数据库：
+### 2. 创建配置文件
+
+复制 `.env.example` 为 `.env`：
 
 ```shell
-npx prisma db push
+cp .env.example .env
 ```
+
+Windows PowerShell 可以使用：
+
+```powershell
+Copy-Item .env.example .env
+```
+
+至少需要检查以下配置：
+
+| 变量 | 必需 | 说明 |
+| --- | --- | --- |
+| `AUTH_SECRET` | 是 | 本站会话密钥；生产环境必须替换为不可预测的随机值 |
+| `AUTH_ORIGIN` | 是 | 网站的完整公开地址，例如 `https://sign.example.com` |
+| `NEXTAUTH_URL` | 是 | 通常与 `AUTH_ORIGIN` 相同 |
+| `DATABASE_URL` | 是 | PostgreSQL 连接地址 |
+| `ALLOW_WEB_REGISTRATION` | 否 | 设置为 `true` 并重启后，临时开放本站账号注册 |
+| `CX_PROXY_URL` | 否 | 学习通 HTTP/HTTPS 请求代理；留空时直连 |
+| `BAIDU_MAP_SERVER_AK` | 否 | 服务端逆地理编码所需的百度地图 Web 服务 AK |
+| `NUXT_IM_INIT_CONNECT` | 否 | 服务启动时是否恢复自动监听连接 |
+| `NUXT_PUBLIC_QR_CODE_AUTO_SELECT_FAILED_ON_RETRY` | 否 | 重新扫描时是否自动选择上一轮失败账号 |
+
+不要提交包含真实数据库口令、代理密码、地图 AK 或会话密钥的 `.env` 文件。
+
+### 3. 初始化数据库并启动
 
 ```shell
-pnpm run dev
+pnpm exec prisma db push
+pnpm dev
 ```
 
-打包
+默认访问地址为 `http://localhost:8050`。首次创建本站账号前，将 `ALLOW_WEB_REGISTRATION` 改为 `true` 并重启服务。
+
+注册窗口从服务启动起开放 5 分钟；到期后服务端会拒绝新注册，并尝试把 `.env` 中的开关写回 `false`。因此，运行 Node.js 的账号需要对 `.env` 及其所在目录具有写权限。
+
+## 生产部署：PM2 + Nginx
+
+### 1. 构建和启动
 
 ```shell
-pnpm run build
-pnpm run preview
+pnpm build
+pnpm start:pm2
 ```
 
-## 部署
+提交到生产环境前，必须检查 `ecosystem.config.js` 中的示例密钥、数据库地址、站点地址和端口。该文件当前包含占位配置，并会向 PM2 进程注入环境变量，不能原样用于公网服务。
 
-### 跨客户端二维码签到
+二维码任务队列、账号占位和结果事件保存在单个 Node.js 进程内。PM2 应保持 `instances: 1`；在迁移到共享队列和共享事件存储前，不要横向扩容多个服务端实例。
 
-单账号和批量扫码共用服务端队列。整台服务器每隔至少 200ms 启动一个任务，已经启动的任务并行等待结果；同一学习通账号从排队起只允许一个 URL，其他客户端提交时会看到该任务的状态和最终反馈。扫码弹窗通过 `/api/cx/qr-events` 接收实时结果。任务从开始执行起最多等待 45 秒；超时或服务进程重启导致结果不明时，请先核对签到历史，不要直接重复提交。
+### 2. 配置 Nginx
 
-队列保存在单个 Node 进程内。目前应只运行一个服务端实例；如将来增加实例数，需把队列、账号占位和结果事件迁移到共享存储。若使用 Nginx 反向代理，事件流需要保持长连接且不缓冲响应。
+下面是最小反向代理示例：
 
-### 网页账户注册窗口
+```nginx
+location / {
+    proxy_pass http://127.0.0.1:8050;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
 
-默认禁止注册本站网页账户。需要注册时，在部署根目录的 `.env` 中添加或修改：
-
-```dotenv
-ALLOW_WEB_REGISTRATION=true
+    # 二维码任务和最近签到使用事件流，不能缓冲响应。
+    proxy_buffering off;
+    proxy_cache off;
+    proxy_read_timeout 75s;
+}
 ```
 
-然后**重启服务端进程**。从服务启动起的五分钟内，可注册多个网页账户；到期后服务端立即拒绝注册，并自动把 `.env` 这一行改回 `ALLOW_WEB_REGISTRATION=false`。修改 `.env` 后不重启不会开放注册；窗口内重启也不会延长截止时间。登录页会在窗口关闭时隐藏“注册”，直接调用注册接口同样会收到 403。此开关不限制已登录用户添加学习通账户。
+生产环境应启用 HTTPS，否则浏览器通常不会授予摄像头和定位权限。`AUTH_ORIGIN` 与 `NEXTAUTH_URL` 必须填写用户实际访问的 HTTPS 地址。
 
-使用 `node --env-file=.env .output/server/index.mjs` 启动时，`.env` 必须与 `.output` 同级，且运行 Node 的账户需要对 `.env` 及其所在目录有写入权限。首次使用需部署包含此功能的新构建；以后切换开关只需修改 `.env` 并重启。
+### 3. 可选代理
 
-### 学习通请求代理（可选）
-
-在部署根目录的 .env 中增加一行（端口按实际代理配置填写）：
+服务器无法稳定直连学习通时，可以设置：
 
 ```dotenv
 CX_PROXY_URL=http://127.0.0.1:7890
 ```
 
-支持 HTTP、HTTPS 代理及用户名/密码认证，例如 `http://user:password@proxy.example:8080`。
-用户名、密码中的 @、:、# 等特殊字符需要 URL 编码；代理地址不接受路径、查询参数或片段。
-未配置或留空时直连；配置代理后连接失败会报错，不会自动回退直连。HTTPS 证书仍会正常校验。
+支持 HTTP、HTTPS 代理及用户名/密码认证，例如 `http://user:password@proxy.example:8080`。用户名和密码中的特殊字符需要 URL 编码。代理地址不能包含路径、查询参数或片段；配置失败时不会自动回退为直连。
 
-代理覆盖学习通登录、资料、课程、签到、云盘和获取监听凭据等 Cx HTTP/HTTPS 请求。
-环信 WebSocket 及其内部请求不使用这项代理设置。
+该代理覆盖登录、资料、课程、签到、云盘及监听凭据等 HTTP/HTTPS 请求，不覆盖环信 WebSocket。`127.0.0.1` 指运行后端的服务器自身。
 
-Windows Server 的目录示例为 `C:\apps\chaoxing-sign\.env`，与 .output 文件夹同级。
-从该目录启动：
+## 部署注意事项
 
-```powershell
-node --env-file=.env .output/server/index.mjs
-```
+- 二维码任务开始执行后最多等待约 45 秒。超时、事件流中断或服务重启会造成结果未知，此时应先核对签到记录，不要立即重复提交。
+- 同一学习通账号从排队起只处理一个二维码 URL；其他客户端可以看到正在执行任务的状态和最终反馈。
+- `BAIDU_MAP_SERVER_AK` 只在服务端使用，其百度地图应用需要启用全球逆地理编码服务，并允许部署服务器的出口 IP 访问。
+- 当前 `Dockerfile` 仍是示例：基础镜像使用 Node.js 18，且包含硬编码环境变量；在升级运行时并改为安全注入配置前，不建议直接用于生产。
+- 本站会保存网站账号、绑定的学习通账号信息及签到记录。请只部署在可信服务器，并限制数据库、日志和配置文件的访问权限。
 
-首次需要部署包含代理支持的新构建；以后修改代理只需重启，无需重新 build。
-127.0.0.1 指运行后端的服务器自身，不是访问网页的电脑。
-代理需由服务器可达，并支持 HTTPS CONNECT。代理 URL 含密码时不要公开分享。
-代理认证失败、连接失败和学习通返回的 403 拒绝访问分别处理；配置代理不保证该出口能够访问学习通。
+<!-- help:start -->
+## 用户指南
 
-### PM2 + Nginx (推荐)
+### 功能概览
 
-本项目已经编写好了 `ecosystem.config.js` 文件，具体请根据实际情况修改环境变量，你可以直接使用 PM2 来启动项目。
+- 管理多个学习通账号，并同步账号信息。
+- 为单个账号扫描二维码，或选择多个账号批量扫码。
+- 使用摄像头、二维码图片或签到链接提交二维码签到。
+- 处理普通、位置、拍照、手势和签到码等活动类型；实际可用性取决于当前活动、部署配置和上游服务状态。
+- 配置签到延迟、默认位置和允许处理的签到类型。
+- 查看本站记录的签到结果和最近签到提示。
+
+当前首页的主要操作入口是二维码签到。课程活动和其他签到类型可能需要活动上下文或额外输入，不能把“一键操作”理解为所有活动都能无条件自动完成。
+
+### 第一次使用
+
+本站账号与学习通账号是两套不同的身份：
+
+1. 管理员临时开放注册窗口后，先在登录页创建本站账号。
+2. 登录本站，在首页点击“添加账号”，输入获得授权的学习通手机号和密码。
+3. 添加成功后，首页会显示账号卡片。可点击卡片选择账号，也可点击“同步”刷新账号信息。
+
+![本站登录页](./docs/ui-preview/portrait-login.png)
+
+![账号首页](./docs/ui-preview/portrait-home.png)
+
+### 二维码签到
+
+#### 单账号扫码
+
+点击账号卡片中的“扫码签到”，然后选择以下任一方式：
+
+- 允许浏览器使用摄像头并实时识别二维码。
+- 点击“选择图片”，或把二维码图片拖入识别区域。
+- 将完整签到链接粘贴到输入框后提交。
+
+移动设备存在多个后置镜头时，可以使用“后置镜头切换”。摄像头只能在 HTTPS 或 `localhost` 环境中使用。
+
+![二维码签到弹层](./docs/ui-preview/portrait-qr.png)
+
+#### 批量扫码
+
+1. 点击账号卡片或使用“全选”选择需要签到的账号。
+2. 普通固定二维码保持“是否为动态刷新码”为“否”。
+3. 二维码会定时变化时，将该选项切换为“是”，再点击“批量扫码”。
+4. 页面会分别展示每个账号的排队、执行和最终结果；重新扫描时可自动选择上一轮失败账号。
+
+同一账号已有任务运行时，新提交不会并行执行。若新二维码对应不同活动，等待当前任务结束后再按页面提示手动重新提交。
+
+### 定位、设置与记录
+
+- 扫码弹层会尝试读取浏览器位置。定位不可用时会使用账号设置中的默认坐标，要求位置的活动可能因此失败。
+- 点击账号卡片中的“设置”，可以调整签到延迟、地址、经纬度和允许的签到类型，也可以移除该学习通账号。
+- 经纬度可通过[百度地图拾取坐标系统](https://api.map.baidu.com/lbsapi/getpoint/index.html)查询。
+- 点击“记录”可查看本站保存的签到请求结果。它不是学习通官方记录，结果未知时仍应到官方渠道复核。
+
+![账号设置](./docs/ui-preview/portrait-settings.png)
+
+### 隐私与安全
+
+- 本站需要保存网站账号、绑定的学习通账号信息和业务 Cookie，才能在服务端发起请求。只应使用可信部署，不要在不明站点输入账号密码。
+- 浏览器选择的二维码图片仅用于本地识别，不会作为图片文件上传到本站服务器；识别出的签到链接会提交给服务端处理。
+- 管理员应保护数据库、`.env`、服务日志和备份，避免公开代理密码、地图 AK、会话密钥及用户数据。
+
+## 常见问题
+
+### 为什么登录页没有注册入口？
+
+本站默认关闭注册。管理员需要把 `ALLOW_WEB_REGISTRATION` 设置为 `true` 并重启服务；注册窗口开放 5 分钟后会自动关闭。该开关只控制本站账号注册，不影响已登录用户添加学习通账号。
+
+### 为什么摄像头或定位不可用？
+
+先确认网站通过 HTTPS 或 `localhost` 访问，并检查浏览器权限。摄像头可能被其他应用占用；定位也可能被系统、浏览器或网络策略禁用。无法使用摄像头时，可以改用二维码图片或直接粘贴签到链接。
+
+### 动态二维码为什么识别后没有立即提交？
+
+启用“动态刷新码”后，扫描器会等待二维码刷新，以降低提交旧码的概率。请让二维码完整出现在取景区域，并在有效期内完成识别和提交。
+
+### 页面提示“结果未知”或事件连接中断怎么办？
+
+不要立即重复扫码。先查看本站签到记录和学习通官方结果；服务端重启、反向代理缓冲、网络中断或等待超时都可能导致页面无法确认最终状态。
+
+### 为什么签到速度较慢或连接学习通失败？
+
+速度取决于部署服务器、出口网络、代理质量和学习通上游状态。若页面持续显示连通性警告，请联系管理员检查服务器网络与 `CX_PROXY_URL`，而不是反复提交任务。
+
+### 拍照、手势或签到码如何处理？
+
+这些类型需要照片、手势轨迹或签到码等额外信息，不能仅凭普通二维码或无输入的一键操作完成。拍照签到依赖学习通云盘中约定的照片；手势和签到码活动需要按页面提示输入对应内容。若当前界面没有提供所需活动入口，请使用官方客户端完成。
+
+### 使用范围
+
+本项目用于学习 Nuxt 全栈开发、协议交互和自托管服务。不得用于商业用途，不得绕过课程或平台规则，也不得操作未获授权的账号。
+<!-- help:end -->
+
+## 开发与维护
+
+常用命令：
 
 ```shell
-npm run start:pm2
+pnpm dev       # 开发服务器
+pnpm lint      # 代码检查
+pnpm build     # 生产构建
+pnpm preview   # 本地预览生产构建
 ```
 
-此时已经启动好了本地端口为 `8050` 的服务，要注意，如果你使用了 Nginx 的反向代理，那么你需要将 `AUTH_ORIGIN` 环境变量设置为你的域名，否则将无法正常使用。并在 Nginx 中添加如下配置：
+主要目录：
 
-```nginx
-    location / {
-      proxy_pass http://127.0.0.1:8050;
-    }
-```
+| 目录 | 用途 |
+| --- | --- |
+| `pages/`、`components/` | 页面与界面组件 |
+| `stores/` | 账号与日志状态 |
+| `server/api/` | Nitro API 路由 |
+| `server/protocol/` | 学习通及环信协议适配 |
+| `server/utils/` | 队列、监听、记录及服务端工具 |
+| `prisma/` | PostgreSQL 数据模型 |
+| `docs/` | 架构、接口和界面验证资料 |
 
-此外可能还需要配置 SSL 证书，因为要调用摄像头权限就必须是在安全环境下（即https下），否则你将无法使用扫一扫功能，这也是无奈之举。
+修改签到流程时，应区分“请求已提交”“服务端已执行”和“签到结果已确认”三个状态。对于结果未知的外部操作，不应自动重试。
 
-### Docker
+## 免责声明
 
-本项目已经编写好了 docker 相关文件，你可以直接使用 Docker 来启动项目。
+本项目仅供学习交流、技术分享和合法授权范围内的测试。任何使用者都应自行确认其行为符合当地法律、学校规定、课程要求和平台条款。因不当使用导致的账号、数据、纪律或法律后果由使用者自行承担。
 
-> ⚠️ 注意: 需要将 node_modules 复制到镜像内, 因为 prisma client 产物存在 node_modules 内.
+如项目内容影响相关权利人的合法权益，请通过仓库 Issue 联系维护者处理。
 
-如果你有自己的 postgresql (远程)数据库，那么你需要在 Dockerfile 中修改 `DATABASE_URL` 环境变量为你的数据库地址，执行下方命令即可构建镜像。
+## 致谢与许可证
 
-```shell
-docker buildx build . -t chaoxing-sign:latest
-```
+- 当前维护：[TimePineapple](https://github.com/TimePineapple)
+- 原作者：[Kuizuo](https://kuizuo.cn)
 
-### Vercel or Netlify（不推荐）
-
-由于采用 Nuxt.js 框架，所以非常容易部署在 Vercel 或 Netlify 等平台上，但还是不推荐部署，理由如下：
-
-Vercel 或 Netlify 的服务器设立在国外，用户需要通过一些特殊手段能够访问，并且由于某星的服务器设立在国内，数据请求需要多一道障碍来访问，将导致响应速度过慢，网站体验效果极其不佳，已亲测，因此不推荐使用（无奈之举）。
-
-## 🤝 免责声明
-
-本项目仅作为个人技术专研，仅供学习参考。不得用于商业用途。
-
-## 📝 License
-
-MIT License © 2023-PRESENT Kuizuo
+项目基于 [MIT License](./LICENSE) 开源。

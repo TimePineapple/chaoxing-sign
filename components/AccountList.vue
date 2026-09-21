@@ -70,27 +70,6 @@ onBeforeUnmount(() => {
     </div>
 
     <ClientOnly>
-      <template #fallback>
-        <div class="account-stack">
-          <n-card v-for="i in 3" :key="i">
-            <template #header>
-              <n-space :size="10">
-                <n-skeleton height="40px" width="40px" />
-                <n-skeleton height="40px" width="120px" />
-              </n-space>
-            </template>
-            <n-skeleton text :repeat="1" />
-            <template #action>
-              <n-space :size="20">
-                <n-skeleton height="20px" width="20px" />
-                <n-skeleton height="20px" width="20px" />
-                <n-skeleton height="20px" width="20px" />
-                <n-skeleton height="20px" width="20px" />
-              </n-space>
-            </template>
-          </n-card>
-        </div>
-      </template>
       <template v-if=" accountStore.accounts?.length! > 0">
         <div class="account-stack">
           <AccountItem v-for="account in accountStore.accounts" v-bind="pick(account, ['uid', 'info', 'lastLoginTime', 'selected', 'setting'])" :key="account.uid" :recent-sign="accountStore.recentSigns[account.uid]" @click="selectAccount(account)" />

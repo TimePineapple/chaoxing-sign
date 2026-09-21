@@ -48,7 +48,7 @@ flowchart TD
 | 数据 | Prisma 5、PostgreSQL | `prisma/schema.prisma`、`server/utils/db.ts` |
 | 超星协议 | got、tough-cookie、cheerio；HTML/JSON 解析 | `server/protocol/cx/` |
 | 后台监听 | Easemob Web SDK、JSDOM、ws、进程内 Map | `server/protocol/easemob/`、`server/utils/monitor.ts` |
-| 帮助内容 | Nuxt Content | `content/help.md`、`pages/help.vue` |
+| 帮助内容 | README 共享区段、Nuxt MDC | `README.md`、`pages/help.vue` |
 | 启动与部署 | pnpm、Nitro Node 产物、PM2 / Docker / GitHub Actions | `package.json`、`ecosystem.config.js`、`Dockerfile`、`.github/workflows/ci.yml` |
 
 源码目录包含 6 个页面、18 个组件、2 个 store、3 个服务端中间件、18 个 API 文件。API 文件中有 16 个业务接口、1 个认证通配处理器、1 个空文件。
@@ -65,7 +65,7 @@ Nuxt 自动导入组件、Vue/Nuxt 工具及 store；许多文件没有显式 im
 | `/` | `Hero`、`AccountList`、`AccountItem`、`Operation`、`Log` | 同步/添加/移除超星账号、单账号与批量签到、监听、设置、历史 |
 | `/account/:uid` | 从 account store 查账号；`CourseList` 与活动弹窗 | 获取课程、活动列表、课程签到、活动签到 |
 | `/profile` | `useAuth().data.user` | 已有会话数据，只读资料；没有资料更新接口 |
-| `/help` | page layout、`ContentDoc` | Markdown 内容，无自定义业务 API |
+| `/help` | page layout、README 原文抽取、`MDC` | 仅渲染 README 的用户指南区段，无自定义业务 API |
 | `/404` | Naive UI Result | 返回上一页或首页 |
 
 全局 Header 包含帮助入口、明暗主题切换、`UserButton`；后者提供资料和网站退出登录。默认布局包含 Header/Footer，`app.vue` 提供配置、消息、加载指示器。
