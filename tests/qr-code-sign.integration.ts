@@ -24,6 +24,10 @@ function fixture(uid: string, ownerId = 'web-a') {
       findUnique: vi.fn().mockResolvedValue({ userId: ownerId }),
     },
     course: { findFirst: vi.fn().mockResolvedValue(null) },
+    qrCourseSlotCache: {
+      findUnique: vi.fn().mockResolvedValue(null),
+      upsert: vi.fn().mockResolvedValue({}),
+    },
     signLog: { create: vi.fn().mockResolvedValue({ id: 'saved-sign-log' }), update: vi.fn().mockResolvedValue({}) },
   }
   const event = {
@@ -80,7 +84,104 @@ describe('QR submission endpoint', () => {
       where: { id: 'saved-sign-log' }, data: { courseName: '示例课程' },
     }))
     expect(cx.getCourseList).toHaveBeenCalledTimes(1)
+    expect(prisma.qrCourseSlotCache.findUnique).not.toHaveBeenCalled()
     expect(queue.replay('web-a', 0).at(-1)).toMatchObject({ state: 'success', result: '签到成功' })
+  })
+
+  it('uses a matching weekly slot cache without requesting the live course list', async () => {
+    const { cx, prisma, event } = fixture('cx-a')
+    cx.getActivityDetail.mockResolvedValue({ ...activity, courseId: '', clazzId: 300 })
+    prisma.qrCourseSlotCache.findUnique.mockResolvedValue({ courseId: 'cached-course', courseName: '缓存课程' })
+
+    await handler(event)
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(prisma.qrCourseSlotCache.findUnique).toHaveBeenCalledWith(expect.objectContaining({
+      where: { accountId_weekday_slotStartMinute_classId: {
+        accountId: 'cx-a', weekday: 4, slotStartMinute: 450, classId: '300',
+      } },
+    }))
+    expect(cx.getCourseList).not.toHaveBeenCalled()
+    expect(cx.signQrCode.mock.calls[0][2]).toBe('cached-course')
+    expect(prisma.signLog.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ courseName: '缓存课程' }),
+    })
+  })
+
+  it('queries live on a slot miss, caches the match, and avoids a second name lookup', async () => {
+    const { cx, prisma, event } = fixture('cx-a')
+    cx.getActivityDetail.mockResolvedValue({ ...activity, courseId: '', clazzId: 300 })
+    cx.getCourseList.mockResolvedValue([{ name: '实时课程', courseId: 'live-course', classId: '300' }])
+
+    await handler(event)
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(cx.getCourseList).toHaveBeenCalledTimes(1)
+    expect(prisma.qrCourseSlotCache.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      update: { courseId: 'live-course', courseName: '实时课程' },
+    }))
+    expect(cx.signQrCode.mock.calls[0][2]).toBe('live-course')
+  })
+
+  it('refreshes a cache entry that conflicts with the request course id', async () => {
+    const { cx, prisma, event } = fixture('cx-a')
+    event.body.courseId = 'live-course'
+    cx.getActivityDetail.mockResolvedValue({ ...activity, courseId: '', clazzId: 300 })
+    prisma.qrCourseSlotCache.findUnique.mockResolvedValue({ courseId: 'stale-course', courseName: '旧课程' })
+    cx.getCourseList.mockResolvedValue([{ name: '新课程', courseId: 'live-course', classId: '300' }])
+
+    await handler(event)
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(cx.getCourseList).toHaveBeenCalledTimes(1)
+    expect(prisma.qrCourseSlotCache.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      update: { courseId: 'live-course', courseName: '新课程' },
+    }))
+    expect(cx.signQrCode.mock.calls[0][2]).toBe('live-course')
+  })
+
+  it('continues through live lookup when slot cache reads and writes fail', async () => {
+    const { cx, prisma, event } = fixture('cx-a')
+    cx.getActivityDetail.mockResolvedValue({ ...activity, courseId: '', clazzId: 300 })
+    prisma.qrCourseSlotCache.findUnique.mockRejectedValue(new Error('cache unavailable'))
+    prisma.qrCourseSlotCache.upsert.mockRejectedValue(new Error('cache unavailable'))
+    cx.getCourseList.mockResolvedValue([{ name: '实时课程', courseId: 'live-course', classId: '300' }])
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    await handler(event)
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(cx.getCourseList).toHaveBeenCalledTimes(1)
+    expect(cx.signQrCode.mock.calls[0][2]).toBe('live-course')
+    expect(queue.replay('web-a', 0).at(-1)).toMatchObject({ state: 'success' })
+  })
+
+  it('keeps the existing course resolution flow outside cache hours', async () => {
+    vi.setSystemTime(new Date('2026-01-01T22:00:00.000Z')) // Beijing Friday 06:00
+    const { cx, prisma, event } = fixture('cx-a')
+    cx.getActivityDetail.mockResolvedValue({ ...activity, courseId: '', clazzId: 300 })
+    prisma.course.findFirst.mockResolvedValue({ courseId: 'saved-course' })
+
+    await handler(event)
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(prisma.qrCourseSlotCache.findUnique).not.toHaveBeenCalled()
+    expect(prisma.course.findFirst).toHaveBeenCalled()
+    expect(cx.signQrCode.mock.calls[0][2]).toBe('saved-course')
+  })
+
+  it('does not cache or submit when the live list has no matching class', async () => {
+    const { cx, prisma, event } = fixture('cx-a')
+    cx.getActivityDetail.mockResolvedValue({ ...activity, courseId: '', clazzId: 300 })
+    cx.getCourseList.mockResolvedValue([{ name: '其他课程', courseId: 'other-course', classId: '999' }])
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    await handler(event)
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(prisma.qrCourseSlotCache.upsert).not.toHaveBeenCalled()
+    expect(cx.signQrCode).not.toHaveBeenCalled()
+    expect(queue.replay('web-a', 0).at(-1)).toMatchObject({ state: 'error', message: expect.stringContaining('未能在该账号的课程列表中匹配') })
   })
 
   it('rejects a second URL for the same account even while the first job is still queued', async () => {
@@ -95,7 +196,7 @@ describe('QR submission endpoint', () => {
     expect(prisma.signLog.create).toHaveBeenCalledTimes(1)
   })
 
-  it('uses one global 200ms interval across distinct website owners', async () => {
+  it('uses one global request interval across distinct website owners', async () => {
     const a = fixture('cx-a', 'web-a')
     const b = fixture('cx-b', 'web-b')
     const started: number[] = []
@@ -105,8 +206,9 @@ describe('QR submission endpoint', () => {
     await handler(b.event)
     await vi.advanceTimersByTimeAsync(0)
     expect(started).toHaveLength(1)
-    await vi.advanceTimersByTimeAsync(200)
-    expect(started[1] - started[0]).toBe(200)
+    await vi.advanceTimersByTimeAsync(100)
+    expect(started[1] - started[0]).toBeGreaterThanOrEqual(30)
+    expect(started[1] - started[0]).toBeLessThanOrEqual(100)
     expect(a.prisma.signLog.create).toHaveBeenCalledTimes(1)
     expect(b.prisma.signLog.create).toHaveBeenCalledTimes(1)
   })

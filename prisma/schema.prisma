@@ -20,17 +20,18 @@ model User {
 }
 
 model CxAccount {
-  uid           String    @id @unique
-  username      String
-  password      String
-  cookies       Json[]
-  info          Json
-  lastLoginTime DateTime
-  courses       Course[]
-  signlogs      SignLog[]
-  setting       Json
-  User          User      @relation(fields: [userId], references: [id])
-  userId        String
+  uid                 String              @id @unique
+  username            String
+  password            String
+  cookies             Json[]
+  info                Json
+  lastLoginTime       DateTime
+  courses             Course[]
+  signlogs            SignLog[]
+  qrCourseSlotCaches  QrCourseSlotCache[]
+  setting             Json
+  User                User                @relation(fields: [userId], references: [id])
+  userId              String
 }
 
 model Course {
@@ -56,4 +57,20 @@ model SignLog {
   accountId    String
 
   @@index([accountId, result, time])
+}
+
+model QrCourseSlotCache {
+  id              String    @id @default(cuid())
+  accountId       String
+  weekday         Int
+  slotStartMinute Int
+  classId         String
+  courseId        String
+  courseName      String
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  account         CxAccount @relation(fields: [accountId], references: [uid], onDelete: Cascade)
+
+  @@unique([accountId, weekday, slotStartMinute, classId])
+  @@index([accountId, weekday, slotStartMinute])
 }

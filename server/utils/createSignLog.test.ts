@@ -47,6 +47,27 @@ it('does not query or broadcast failed sign attempts', async () => {
   expect(getCourseList).not.toHaveBeenCalled()
 })
 
+it('uses a trusted course name without refreshing the live course list', async () => {
+  const getCourseList = vi.fn()
+  const onSign = vi.fn()
+  const close = recentSignBus.subscribe('web-a', onSign)
+  try {
+    await createSignLog({ user: { uid: 'cx-a' }, getCourseList } as any, {
+      signLog: { create: vi.fn().mockResolvedValue({ id: 'log-trusted' }), update: vi.fn() },
+      cxAccount: { findUnique: vi.fn().mockResolvedValue({ userId: 'web-a' }) },
+    } as any, {
+      activityId: '13', activityName: '签到', courseId: 'course-1', classId: 'class-1',
+      courseName: '时段缓存课程', skipCourseNameRefresh: true, type: 0, mode: 1, result: '签到成功',
+    })
+    await vi.waitFor(() => expect(onSign).toHaveBeenCalledOnce())
+    expect(getCourseList).not.toHaveBeenCalled()
+    expect(onSign.mock.calls[0][0].sign.name).toBe('时段缓存课程')
+  }
+  finally {
+    close()
+  }
+})
+
 it('pushes a known course name when the live course lookup fails', async () => {
   const getCourseList = vi.fn().mockRejectedValue(new Error('upstream unavailable'))
   const onSign = vi.fn()

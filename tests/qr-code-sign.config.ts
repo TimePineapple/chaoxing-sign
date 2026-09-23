@@ -31,6 +31,7 @@ export default defineConfig({
       'server/utils/cxRequestStartQueue.test.ts',
       'server/utils/recentSignBus.test.ts',
       'server/utils/createSignLog.test.ts',
+      'server/utils/qrCourseSlot.test.ts',
       'tests/recent-sign-writes.ts',
       'tests/recent-sign-events.ui.ts',
       'tests/recent-sign-sse.test.ts',

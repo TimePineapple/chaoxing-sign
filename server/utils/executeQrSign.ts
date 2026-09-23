@@ -6,6 +6,7 @@ import { getCachedBaiduAddress } from '~/server/utils/baiduReverseGeocode'
 import { safeQrContentType, summarizeQrUpstreamBody } from '~/server/utils/qrUpstreamFeedback'
 import type { QrCoordinates } from '~/utils/qrLocation'
 import { createSignLog } from '~/server/utils/createSignLog'
+import { resolveQrCourseSlot } from '~/server/utils/qrCourseSlot'
 
 export interface QrSignInput {
   uid: string
@@ -20,6 +21,16 @@ class QrSignExecutionError extends Error {
   constructor(public readonly publicMessage: string, public readonly code: string) {
     super(publicMessage)
   }
+}
+
+interface QrCourseSlotCacheRecord {
+  courseId: string
+  courseName: string
+}
+
+interface QrCourseSlotCacheStore {
+  findUnique: (args: unknown) => Promise<QrCourseSlotCacheRecord | null>
+  upsert: (args: unknown) => Promise<unknown>
 }
 
 export async function executeQrSign(
@@ -48,34 +59,120 @@ export async function executeQrSign(
 
     stage = '匹配签到课程'
     const classId = String(activity.clazzId ?? '').trim()
+    const requestedCourseId = String(body.courseId ?? '').trim()
     let resolvedCourseId = String(activity.courseId ?? '').trim()
-    if (resolvedCourseId && body.courseId && resolvedCourseId !== String(body.courseId).trim())
+    let courseName: string | undefined
+    let skipCourseNameRefresh = false
+    if (resolvedCourseId && requestedCourseId && resolvedCourseId !== requestedCourseId)
       throw new QrSignExecutionError('二维码活动与当前课程不一致，请核对后重试', 'COURSE_MISMATCH')
 
-    if (!resolvedCourseId && classId)
-      resolvedCourseId = String(cx.courseList?.find(course => String(course.classId) === classId)?.courseId ?? '')
+    const slot = !resolvedCourseId && classId ? resolveQrCourseSlot() : null
+    if (slot) {
+      const slotCache = (prisma as unknown as { qrCourseSlotCache: QrCourseSlotCacheStore }).qrCourseSlotCache
+      trace('course slot cache lookup start', { weekday: slot.weekday, slotStartMinute: slot.slotStartMinute })
+      try {
+        const cached = await slotCache.findUnique({
+          where: {
+            accountId_weekday_slotStartMinute_classId: {
+              accountId: cx.user.uid,
+              weekday: slot.weekday,
+              slotStartMinute: slot.slotStartMinute,
+              classId,
+            },
+          },
+          select: { courseId: true, courseName: true },
+        })
+        signal.throwIfAborted()
+        if (cached && requestedCourseId && cached.courseId !== requestedCourseId) {
+          trace('course slot cache conflict', { weekday: slot.weekday, slotStartMinute: slot.slotStartMinute })
+        }
+        else if (cached) {
+          resolvedCourseId = cached.courseId.trim()
+          courseName = cached.courseName.trim() || undefined
+          skipCourseNameRefresh = true
+          trace('course slot cache hit', { weekday: slot.weekday, slotStartMinute: slot.slotStartMinute })
+        }
+        else {
+          trace('course slot cache miss', { weekday: slot.weekday, slotStartMinute: slot.slotStartMinute })
+        }
+      }
+      catch (error) {
+        if (signal.aborted)
+          throw error
+        console.warn(`[qr-code-sign][${traceId}] course slot cache read unavailable`, {
+          weekday: slot.weekday,
+          slotStartMinute: slot.slotStartMinute,
+          elapsedMs: Date.now() - startedAt,
+        })
+      }
 
-    if (!resolvedCourseId && classId) {
-      trace('course database lookup start')
-      const saved = await prisma.course.findFirst({
-        where: { classId, accounts: { some: { uid: cx.user.uid } } },
-        select: { courseId: true },
-      })
-      signal.throwIfAborted()
-      resolvedCourseId = saved?.courseId || ''
+      if (!resolvedCourseId) {
+        trace('course live lookup start')
+        const courses = await cx.getCourseList(signal)
+        signal.throwIfAborted()
+        const matched = courses.find(course => String(course.classId) === classId)
+        resolvedCourseId = String(matched?.courseId ?? '').trim()
+        courseName = matched?.name?.trim() || undefined
+        if (matched && resolvedCourseId) {
+          skipCourseNameRefresh = true
+          try {
+            await slotCache.upsert({
+              where: {
+                accountId_weekday_slotStartMinute_classId: {
+                  accountId: cx.user.uid,
+                  weekday: slot.weekday,
+                  slotStartMinute: slot.slotStartMinute,
+                  classId,
+                },
+              },
+              create: {
+                accountId: cx.user.uid,
+                weekday: slot.weekday,
+                slotStartMinute: slot.slotStartMinute,
+                classId,
+                courseId: resolvedCourseId,
+                courseName: courseName || '',
+              },
+              update: { courseId: resolvedCourseId, courseName: courseName || '' },
+            })
+            trace('course slot cache write complete', { weekday: slot.weekday, slotStartMinute: slot.slotStartMinute })
+          }
+          catch {
+            console.warn(`[qr-code-sign][${traceId}] course slot cache write unavailable`, {
+              weekday: slot.weekday,
+              slotStartMinute: slot.slotStartMinute,
+              elapsedMs: Date.now() - startedAt,
+            })
+          }
+        }
+      }
+    }
+    else if (!resolvedCourseId) {
+      if (classId)
+        resolvedCourseId = String(cx.courseList?.find(course => String(course.classId) === classId)?.courseId ?? '')
+
+      if (!resolvedCourseId && classId) {
+        trace('course database lookup start')
+        const saved = await prisma.course.findFirst({
+          where: { classId, accounts: { some: { uid: cx.user.uid } } },
+          select: { courseId: true },
+        })
+        signal.throwIfAborted()
+        resolvedCourseId = saved?.courseId || ''
+      }
+
+      if (!resolvedCourseId && requestedCourseId)
+        resolvedCourseId = requestedCourseId
+
+      if (!resolvedCourseId && classId) {
+        trace('course live lookup start')
+        const courses = await cx.getCourseList(signal)
+        signal.throwIfAborted()
+        resolvedCourseId = String(courses.find(course => String(course.classId) === classId)?.courseId ?? '')
+      }
     }
 
-    if (!resolvedCourseId && body.courseId)
-      resolvedCourseId = String(body.courseId).trim()
-
-    if (!resolvedCourseId && classId) {
-      trace('course live lookup start')
-      const courses = await cx.getCourseList(signal)
-      signal.throwIfAborted()
-      resolvedCourseId = String(courses.find(course => String(course.classId) === classId)?.courseId ?? '')
-    }
-
-    if (resolvedCourseId && body.courseId && resolvedCourseId !== String(body.courseId).trim())
+    if (resolvedCourseId && requestedCourseId && resolvedCourseId !== requestedCourseId)
       throw new QrSignExecutionError('二维码活动与当前课程不一致，请核对后重试', 'COURSE_MISMATCH')
 
     if (!resolvedCourseId)
@@ -83,7 +180,7 @@ export async function executeQrSign(
         ? '未能在该账号的课程列表中匹配签到班级，请先同步课程后重试'
         : '活动详情缺少班级 ID 和课程 ID，无法预签到', 'COURSE_MISSING')
 
-    const courseName = cx.courseList?.find(course => String(course.courseId) === resolvedCourseId
+    courseName ||= cx.courseList?.find(course => String(course.courseId) === resolvedCourseId
       && (!classId || String(course.classId) === classId))?.name?.trim()
 
     activity.code = body.code
@@ -158,7 +255,7 @@ export async function executeQrSign(
     signal.throwIfAborted()
     await createSignLog(cx, prisma, {
       activityId: String(activity.id), activityName: activity.name,
-      courseId: resolvedCourseId, classId, courseName,
+      courseId: resolvedCourseId, classId, courseName, skipCourseNameRefresh,
       type: activity.otherId, mode: SignMode.Manual, result,
     }, onCourseNameResolved)
     trace('request complete', { success: result === '签到成功' })

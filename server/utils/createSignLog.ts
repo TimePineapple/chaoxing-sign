@@ -12,6 +12,7 @@ export interface SignLogInput {
   courseId?: string | number | null
   classId?: string | number | null
   courseName?: string | null
+  skipCourseNameRefresh?: boolean
 }
 
 export async function createSignLog(cx: Cx, prisma: PrismaClient, input: SignLogInput, onCourseNameResolved?: (name: string) => void) {
@@ -32,7 +33,9 @@ export async function createSignLog(cx: Cx, prisma: PrismaClient, input: SignLog
 
   if (input.result === '签到成功') {
     void (async () => {
-      const courseName = await resolveSignCourseName(cx, prisma, input, savedName)
+      const courseName = input.skipCourseNameRefresh
+        ? savedName
+        : await resolveSignCourseName(cx, prisma, input, savedName)
       if (courseName) {
         try { onCourseNameResolved?.(courseName) }
         catch { /* A display update cannot change a saved sign result. */ }
