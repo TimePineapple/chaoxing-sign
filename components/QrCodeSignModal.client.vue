@@ -4,6 +4,7 @@ import { QrcodeCapture, QrcodeDropZone, QrcodeStream } from 'vue-qrcode-reader'
 import { createQrCodeSubmissionGuard, parseQrCodeSignLink } from '~/utils/qrCodeSign'
 import { clientLocationStatus, requestQrModalLocationOnce } from '~/utils/clientLocation.client'
 import { qrSignScannerCovered, qrSignSubmissionAllowed, type QrSignOverlayMode } from '~/utils/qrSignOverlay'
+import { applyQrCameraZoom, currentQrCameraZoom, enableQrCameraAutofocus, qrCameraConstraints, qrCameraZoomRange, type QrCameraProfile, type QrCameraZoomRange } from '~/utils/qrScannerCamera.client'
 
 export interface DetectedBarcode {
   boundingBox: BoundingBox
@@ -51,6 +52,11 @@ const cameraReady = ref(false)
 const rearCameras = ref<{ deviceId: string; label: string }[]>([])
 const selectedCameraId = ref<string | null>(null)
 const activeCameraId = ref<string | null>(null)
+const cameraProfile = ref<QrCameraProfile>('distant')
+const zoomRange = ref<QrCameraZoomRange | null>(null)
+const zoomValue = ref(1)
+const zoomApplying = ref(false)
+const actualResolution = ref('')
 const scanLocked = ref(false)
 const silentlyCaptured = ref(false)
 const errorMessage = ref('')
@@ -61,10 +67,10 @@ const captureContainer = ref<HTMLElement>()
 const submissionGuard = createQrCodeSubmissionGuard()
 let pendingDetectedTimer: ReturnType<typeof setTimeout> | undefined
 let cameraListRequest = 0
+let cameraSettingsRequest = 0
+let activeCameraTrack: MediaStreamTrack | null = null
 
-const cameraConstraints = computed<MediaTrackConstraints>(() => selectedCameraId.value
-  ? { deviceId: { exact: selectedCameraId.value } }
-  : { facingMode: { ideal: 'environment' } })
+const cameraConstraints = computed(() => qrCameraConstraints(selectedCameraId.value, cameraProfile.value))
 
 const rearCameraIndex = computed(() => rearCameras.value.findIndex(camera => camera.deviceId === activeCameraId.value))
 const scannerCovered = computed(() => qrSignScannerCovered(props.queueOverlay))
@@ -115,10 +121,66 @@ watch(() => props.queueOverlay, (mode) => {
 
 function resetCameraSelection() {
   cameraListRequest++
+  resetCameraEnhancements()
   rearCameras.value = []
   selectedCameraId.value = null
   activeCameraId.value = null
 }
+
+function resetCameraEnhancements() {
+  cameraSettingsRequest++
+  activeCameraTrack = null
+  zoomRange.value = null
+  zoomValue.value = 1
+  zoomApplying.value = false
+  actualResolution.value = ''
+}
+
+function restartCamera(profile: QrCameraProfile) {
+  cameraListRequest++
+  resetCameraEnhancements()
+  clearPendingDetectedLink()
+  lastInvalidCode.value = ''
+  cameraReady.value = false
+  cameraProfile.value = profile
+}
+
+async function changeCameraZoom(event: Event) {
+  const track = activeCameraTrack
+  const range = zoomRange.value
+  if (!track || !range || zoomApplying.value || !cameraReady.value || props.loading || scannerCovered.value)
+    return
+
+  const requestId = cameraSettingsRequest
+  zoomApplying.value = true
+  try {
+    const value = await applyQrCameraZoom(track, Number((event.target as HTMLInputElement).value), range)
+    if (requestId === cameraSettingsRequest)
+      zoomValue.value = value
+  }
+  catch {
+    if (requestId === cameraSettingsRequest) {
+      zoomRange.value = null
+      ms.warning('此摄像头暂时无法调整变焦，请尝试切换后置镜头')
+    }
+  }
+  finally {
+    if (requestId === cameraSettingsRequest)
+      zoomApplying.value = false
+  }
+}
+
+function paintBoundingBox(detectedCodes: DetectedBarcode[], ctx: CanvasRenderingContext2D) {
+  ctx.lineWidth = 2
+  ctx.strokeStyle = '#18a058'
+  for (const { boundingBox } of detectedCodes)
+    ctx.strokeRect(boundingBox.x, boundingBox.y, boundingBox.width, boundingBox.height)
+}
+
+onBeforeUnmount(() => {
+  clearPendingDetectedLink()
+  resetCameraEnhancements()
+})
 
 function isRearCameraLabel(label: string): boolean {
   return /\b(back|rear|environment)\b|后置|後置|背面|背部|后摄|後鏡/i.test(label)
@@ -260,6 +322,7 @@ function handleScan() {
   scanLocked.value = false
   silentlyCaptured.value = false
   cameraReady.value = false
+  cameraProfile.value = 'distant'
   resetCameraSelection()
   showScan.value = true
 }
@@ -274,23 +337,68 @@ function switchCamera() {
     return
 
   cameraListRequest++
+  resetCameraEnhancements()
   clearPendingDetectedLink()
   lastInvalidCode.value = ''
   cameraReady.value = false
   selectedCameraId.value = nextCamera.deviceId
+  cameraProfile.value = 'distant'
 }
 
-function onCameraOn() {
-  if (scannerCovered.value)
+async function onCameraOn() {
+  if (!showScan.value || scannerCovered.value)
     return
+  resetCameraEnhancements()
+  const requestId = cameraSettingsRequest
   cameraReady.value = true
   errorMessage.value = ''
   void refreshRearCameras(++cameraListRequest)
+
+  const video = scannerContainer.value?.querySelector('video')
+  const track = (video?.srcObject as MediaStream | null)?.getVideoTracks()[0]
+  if (!track)
+    return
+
+  activeCameraTrack = track
+  const settings = track.getSettings()
+  if (settings.width && settings.height)
+    actualResolution.value = `${settings.width} × ${settings.height}`
+
+  await enableQrCameraAutofocus(track)
+  if (requestId !== cameraSettingsRequest)
+    return
+
+  const range = qrCameraZoomRange(track)
+  if (!range || !track.applyConstraints)
+    return
+  zoomValue.value = currentQrCameraZoom(track, range)
+  zoomApplying.value = true
+  try {
+    const value = await applyQrCameraZoom(track, 2, range)
+    if (requestId !== cameraSettingsRequest)
+      return
+    zoomValue.value = value
+  }
+  catch {
+    // Keep scanning with the camera's current zoom if automatic adjustment fails.
+  }
+  finally {
+    if (requestId === cameraSettingsRequest)
+      zoomApplying.value = false
+  }
+  if (requestId === cameraSettingsRequest)
+    zoomRange.value = range
 }
 
-function onError(error: { name?: string }) {
-  if (scannerCovered.value)
+function onError(error: { name?: string; constraint?: string }) {
+  if (!showScan.value || scannerCovered.value)
     return
+  if (error.name === 'OverconstrainedError' && error.constraint !== 'deviceId' && cameraProfile.value !== 'compatible') {
+    const profile = cameraProfile.value === 'distant' ? 'fallback' : 'compatible'
+    restartCamera(profile)
+    ms.warning(profile === 'fallback' ? '摄像头不支持 4K 配置，已回退至高清配置' : '摄像头不支持高清配置，已使用默认配置')
+    return
+  }
   const errorMessages: Record<string, string> = {
     NotAllowedError: '您需要授予相机访问权限！',
     NotFoundError: '此设备上没有摄像头！',
@@ -329,6 +437,7 @@ function handleOpen() {
   scanLocked.value = false
   silentlyCaptured.value = false
   cameraReady.value = false
+  cameraProfile.value = 'distant'
   resetCameraSelection()
   showScan.value = !scannerCovered.value
 }
@@ -401,6 +510,23 @@ function handleUpload() {
       </n-button>
     </n-space>
 
+    <div v-if="showScan && zoomRange" class="camera-zoom-control">
+      <label for="qr-camera-zoom">变焦 {{ zoomValue.toFixed(1) }}×</label>
+      <input
+        id="qr-camera-zoom"
+        type="range"
+        :min="zoomRange.min"
+        :max="zoomRange.max"
+        :step="zoomRange.step"
+        :value="zoomValue"
+        :disabled="loading || scannerCovered || !cameraReady || zoomApplying"
+        @change="changeCameraZoom"
+      >
+    </div>
+    <n-text v-if="showScan && cameraReady && actualResolution" class="camera-resolution" depth="3">
+      当前画面 {{ actualResolution }}；远处二维码可尝试切换镜头或调整变焦。
+    </n-text>
+
     <n-text class="scan-status" :type="errorMessage ? 'error' : 'info'">
       {{ scanStatus }}
     </n-text>
@@ -426,6 +552,9 @@ function handleUpload() {
       <QrcodeStream
         v-if="showScan && !scannerCovered"
         :constraints="cameraConstraints"
+        :formats="['qr_code']"
+        :track="paintBoundingBox"
+        :torch="false"
         class="bg-black/20"
         @camera-on="onCameraOn"
         @error="onError"
@@ -477,6 +606,29 @@ function handleUpload() {
 .qr-scanner {
   position: relative;
   overflow: hidden;
+}
+
+.camera-zoom-control {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.camera-zoom-control label {
+  flex-shrink: 0;
+}
+
+.camera-zoom-control input {
+  flex: 1;
+  min-width: 0;
+  accent-color: #18a058;
+}
+
+.camera-resolution {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 12px;
 }
 
 .dynamic-code-waiting-hint {

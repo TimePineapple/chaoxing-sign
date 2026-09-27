@@ -14,19 +14,32 @@ vi.mock('vue-qrcode-reader', async () => {
     QrcodeCapture: empty,
     QrcodeDropZone: empty,
     QrcodeStream: defineComponent({
-      props: { constraints: Object },
-      emits: ['detect', 'camera-on'],
+      props: { constraints: Object, formats: Array, track: Function, torch: Boolean },
+      emits: ['detect', 'camera-on', 'error'],
       setup: (props, { emit }) => {
+        let zoom = 1
+        const constraints = () => props.constraints as { deviceId?: { exact?: string }; width?: { ideal?: number }; height?: { ideal?: number } }
         onMounted(() => emit('camera-on'))
         watch(() => props.constraints, () => emit('camera-on'), { deep: true })
         return () => h('div', [
           h('video', { ref: (element: HTMLVideoElement | null) => {
             if (element) {
               Object.defineProperty(element, 'srcObject', { configurable: true, value: {
-                getVideoTracks: () => [{ getSettings: () => ({
-                  deviceId: (props.constraints as { deviceId?: { exact?: string } })?.deviceId?.exact || 'rear-main',
-                  facingMode: 'environment',
-                }) }],
+                getVideoTracks: () => [{
+                  getCapabilities: () => ({ focusMode: ['continuous'], zoom: { min: 1, max: 4, step: 0.1 } }),
+                  applyConstraints: async (options: { advanced?: { zoom?: number }[] }) => {
+                    const requestedZoom = options.advanced?.[0]?.zoom
+                    if (requestedZoom !== undefined)
+                      zoom = requestedZoom
+                  },
+                  getSettings: () => ({
+                    deviceId: (props.constraints as { deviceId?: { exact?: string } })?.deviceId?.exact || 'rear-main',
+                    facingMode: 'environment',
+                    width: constraints()?.width?.ideal ?? 1280,
+                    height: constraints()?.height?.ideal ?? 720,
+                    zoom,
+                  }),
+                }],
               } })
             }
           } }),
@@ -34,8 +47,16 @@ vi.mock('vue-qrcode-reader', async () => {
             'data-testid': 'camera-frame',
             'data-device-id': (props.constraints as { deviceId?: { exact?: string } })?.deviceId?.exact,
             'data-facing-mode': (props.constraints as { facingMode?: { ideal?: string } })?.facingMode?.ideal,
+            'data-width': constraints()?.width?.ideal,
+            'data-height': constraints()?.height?.ideal,
+            'data-tracking': Boolean(props.track),
+            'data-formats': props.formats?.join(','),
             onClick: () => emit('detect', [{ rawValue: 'https://example.test/sign?id=100&c=200&enc=FIXTURE' }]),
           }, '模拟视频检测'),
+          h('button', {
+            'data-testid': 'camera-error',
+            onClick: () => emit('error', { name: 'OverconstrainedError', constraint: 'width' }),
+          }, '模拟相机配置不支持'),
         ])
       },
     }),
@@ -123,12 +144,28 @@ it('shows the dynamic-code waiting hint and batch failures inside the real modal
   await vi.waitFor(() => expect(document.querySelector('[data-testid="camera-frame"]')).not.toBeNull())
   await vi.waitFor(() => expect(locationRequests).toBeGreaterThan(requestsBeforeOpening))
   expect(document.querySelector('[data-testid="camera-frame"]')?.getAttribute('data-facing-mode')).toBe('environment')
+  const cameraFrame = () => document.querySelector('[data-testid="camera-frame"]')
+  expect(cameraFrame()?.getAttribute('data-width')).toBe('3840')
+  expect(cameraFrame()?.getAttribute('data-height')).toBe('2160')
+  expect(cameraFrame()?.getAttribute('data-tracking')).toBe('true')
+  expect(cameraFrame()?.getAttribute('data-formats')).toBe('qr_code')
+  expect(document.querySelector('[role="dialog"]')?.textContent).not.toContain('远距离模式：')
+  await vi.waitFor(() => expect(document.querySelector('.camera-zoom-control label')?.textContent).toContain('2.0×'))
+  const zoomControl = document.querySelector<HTMLInputElement>('#qr-camera-zoom')!
+  zoomControl.value = '2.7'
+  zoomControl.dispatchEvent(new Event('change', { bubbles: true }))
+  await vi.waitFor(() => expect(document.querySelector('.camera-zoom-control label')?.textContent).toContain('2.7×'))
+  document.querySelector<HTMLButtonElement>('[data-testid="camera-error"]')!.click()
+  await vi.waitFor(() => expect(cameraFrame()?.getAttribute('data-width')).toBe('1920'))
+  document.querySelector<HTMLButtonElement>('[data-testid="camera-error"]')!.click()
+  await vi.waitFor(() => expect(cameraFrame()?.getAttribute('data-width')).toBeNull())
   const switchButton = () => buttons().find(button => button.textContent?.includes('后置镜头切换'))
   await vi.waitFor(() => expect(switchButton()?.disabled).toBe(false))
   for (const deviceId of ['rear-tele', 'rear-wide', 'rear-main']) {
     switchButton()!.click()
     await vi.waitFor(() => expect(document.querySelector('[data-testid="camera-frame"]')?.getAttribute('data-device-id')).toBe(deviceId))
     await vi.waitFor(() => expect(switchButton()?.disabled).toBe(false))
+    expect(cameraFrame()?.getAttribute('data-width')).toBe('3840')
   }
   expect(document.querySelector('[data-testid="camera-frame"]')?.getAttribute('data-device-id')).not.toBe('front')
   document.querySelector<HTMLButtonElement>('[data-testid="camera-frame"]')!.click()
