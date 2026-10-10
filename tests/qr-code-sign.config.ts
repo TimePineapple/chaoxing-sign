@@ -17,6 +17,8 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     include: [
+      'tests/course-sync.store.ts',
+      'tests/course-sync.ui.ts',
       'tests/qr-code-sign.integration.ts',
       'tests/qr-code-sign.ui.ts',
       'tests/qr-code-sign-events.ui.ts',

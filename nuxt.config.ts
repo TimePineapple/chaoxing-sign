@@ -38,9 +38,6 @@ export default defineNuxtConfig({
     },
     public: {
       footerConfig,
-      qrCode: {
-        autoSelectFailedOnRetry: true,
-      },
     },
   },
   modules: [

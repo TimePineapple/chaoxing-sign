@@ -33,16 +33,23 @@ const props = withDefaults(defineProps<{
   retryFailedAvailable?: boolean
   dynamicRefreshCode?: boolean
   queueOverlay?: QrSignOverlayMode
+  courseSyncAvailable?: boolean
+  courseSyncLoading?: boolean
+  courseSyncDisabled?: boolean
 }>(), {
   loading: false,
   dynamicRefreshCode: false,
   retryFailedAvailable: false,
   queueOverlay: 'none',
+  courseSyncAvailable: false,
+  courseSyncLoading: false,
+  courseSyncDisabled: false,
 })
 
 const emit = defineEmits<{
   (e: 'success', text: string): void
   (e: 'retry-failed'): void
+  (e: 'syncCourses'): void
 }>()
 
 const ms = useMessage()
@@ -75,6 +82,12 @@ const cameraConstraints = computed(() => qrCameraConstraints(selectedCameraId.va
 const rearCameraIndex = computed(() => rearCameras.value.findIndex(camera => camera.deviceId === activeCameraId.value))
 const scannerCovered = computed(() => qrSignScannerCovered(props.queueOverlay))
 const submissionLocked = computed(() => scanLocked.value || silentlyCaptured.value)
+const interactionLocked = computed(() => props.loading || props.courseSyncLoading)
+
+watch(() => props.courseSyncLoading, (syncing) => {
+  if (syncing)
+    clearPendingDetectedLink()
+})
 
 const qrcode = useQRCode(text, {
   errorCorrectionLevel: 'H',
@@ -148,7 +161,7 @@ function restartCamera(profile: QrCameraProfile) {
 async function changeCameraZoom(event: Event) {
   const track = activeCameraTrack
   const range = zoomRange.value
-  if (!track || !range || zoomApplying.value || !cameraReady.value || props.loading || scannerCovered.value)
+  if (!track || !range || zoomApplying.value || !cameraReady.value || interactionLocked.value || scannerCovered.value)
     return
 
   const requestId = cameraSettingsRequest
@@ -228,7 +241,7 @@ async function refreshRearCameras(requestId: number) {
 function acceptQrCode(value: string) {
   const link = value.trim()
 
-  if (props.loading || scannerCovered.value)
+  if (interactionLocked.value || scannerCovered.value)
     return
 
   const result = submissionGuard.tryLock(link)
@@ -260,7 +273,7 @@ function acceptQrCode(value: string) {
 function submitQrCode(value: string, waitForSecond = false) {
   const link = value.trim()
 
-  if (props.loading || scannerCovered.value)
+  if (interactionLocked.value || scannerCovered.value)
     return
 
   if (waitForSecond && props.dynamicRefreshCode) {
@@ -298,7 +311,7 @@ function submitQrCode(value: string, waitForSecond = false) {
 }
 
 function handleScan() {
-  if (props.loading || scannerCovered.value)
+  if (interactionLocked.value || scannerCovered.value)
     return
 
   if (showScan.value) {
@@ -328,7 +341,7 @@ function handleScan() {
 }
 
 function switchCamera() {
-  if (!showScan.value || !cameraReady.value || props.loading || scannerCovered.value || rearCameras.value.length < 2)
+  if (!showScan.value || !cameraReady.value || interactionLocked.value || scannerCovered.value || rearCameras.value.length < 2)
     return
 
   const nextIndex = (rearCameraIndex.value + 1) % rearCameras.value.length
@@ -455,7 +468,7 @@ function handleClose() {
 }
 
 function handleUpload() {
-  if (props.loading || scannerCovered.value)
+  if (interactionLocked.value || scannerCovered.value)
     return
 
   showScan.value = false
@@ -487,28 +500,33 @@ function handleUpload() {
     @after-enter="handleOpen"
     @after-leave="handleClose"
   >
-    <n-space class="mb-2">
-      <div class="scan-action">
-        <n-button type="info" :disabled="loading || scannerCovered" @click="handleScan">
-          {{ showScan ? '关闭摄像头' : '重新扫描' }}
+    <div class="qr-scan-actions mb-2">
+      <n-space>
+        <div class="scan-action">
+          <n-button type="info" :disabled="interactionLocked || scannerCovered" @click="handleScan">
+            {{ showScan ? '关闭摄像头' : '重新扫描' }}
+          </n-button>
+          <span
+            v-if="retryFailedAvailable && !showScan"
+            class="retry-failed-hint"
+          >
+            重新扫描将自动选取失败账号
+          </span>
+        </div>
+        <n-button v-if="showScan && rearCameras.length > 1" :disabled="interactionLocked || scannerCovered || !cameraReady" @click="switchCamera">
+          后置镜头切换{{ rearCameraIndex >= 0 ? ` (${rearCameraIndex + 1}/${rearCameras.length})` : '' }}
         </n-button>
-        <span
-          v-if="retryFailedAvailable && !showScan"
-          class="retry-failed-hint"
-        >
-          重新扫描将自动选取失败账号
-        </span>
-      </div>
-      <n-button v-if="showScan && rearCameras.length > 1" :disabled="loading || scannerCovered || !cameraReady" @click="switchCamera">
-        后置镜头切换{{ rearCameraIndex >= 0 ? ` (${rearCameraIndex + 1}/${rearCameras.length})` : '' }}
+        <n-button :disabled="interactionLocked || scannerCovered" @click="handleUpload">
+          选择图片
+        </n-button>
+        <n-button v-if="text" type="error" :disabled="interactionLocked || scannerCovered" @click="text = ''">
+          清除
+        </n-button>
+      </n-space>
+      <n-button v-if="courseSyncAvailable" class="qr-sync-courses" :loading="courseSyncLoading" :disabled="interactionLocked || courseSyncDisabled" @click="emit('syncCourses')">
+        同步课程
       </n-button>
-      <n-button :disabled="loading || scannerCovered" @click="handleUpload">
-        选择图片
-      </n-button>
-      <n-button v-if="text" type="error" :disabled="loading || scannerCovered" @click="text = ''">
-        清除
-      </n-button>
-    </n-space>
+    </div>
 
     <div v-if="showScan && zoomRange" class="camera-zoom-control">
       <label for="qr-camera-zoom">变焦 {{ zoomValue.toFixed(1) }}×</label>
@@ -519,7 +537,7 @@ function handleUpload() {
         :max="zoomRange.max"
         :step="zoomRange.step"
         :value="zoomValue"
-        :disabled="loading || scannerCovered || !cameraReady || zoomApplying"
+        :disabled="interactionLocked || scannerCovered || !cameraReady || zoomApplying"
         @change="changeCameraZoom"
       >
     </div>
@@ -588,12 +606,12 @@ function handleUpload() {
 
     <span>若有签到链接，可直接在下方输入</span>
     <div class="qr-url-actions">
-      <n-input class="qr-url-input" v-model:value="text" placeholder="签到链接" clearable :disabled="loading || scannerCovered" />
+      <n-input class="qr-url-input" v-model:value="text" placeholder="签到链接" clearable :disabled="interactionLocked || scannerCovered" />
       <n-button
         class="qr-url-submit"
         type="primary"
         :loading="loading"
-        :disabled="scannerCovered || !text.trim() || submissionLocked"
+        :disabled="interactionLocked || scannerCovered || !text.trim() || submissionLocked"
         @click="submitQrCode(text)"
       >
         签到
@@ -603,6 +621,22 @@ function handleUpload() {
 </template>
 
 <style scoped>
+.qr-scan-actions {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.qr-scan-actions > .n-space {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+
+.qr-sync-courses {
+  margin-left: auto;
+}
+
 .qr-scanner {
   position: relative;
   overflow: hidden;

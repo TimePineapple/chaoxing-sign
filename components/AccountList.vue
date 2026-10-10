@@ -5,18 +5,18 @@ import { connectRecentSignEvents } from '~/utils/recentSignEvents.client'
 
 const accountStore = useAccountStore()
 
-const isSyncing = ref(false)
 const showLoginModal = ref(false)
 
 async function handleSync() {
-  if (isSyncing.value)
+  if (accountStore.accountSyncLoading || accountStore.courseSyncLoading)
     return
 
-  isSyncing.value = true
-  await accountStore.syncAccounts().finally(() => {
-    isSyncing.value = false
-  })
+  await accountStore.syncAccounts()
   void refreshRecentSignsQuietly(true)
+}
+
+async function handleSyncCourses() {
+  await accountStore.syncCourses(accountStore.accounts.map(account => account.uid))
 }
 
 let lastRecentSignRefresh = 0
@@ -63,10 +63,20 @@ onBeforeUnmount(() => {
   <section class="account-section">
     <div class="section-heading">
       <h2>我的账号 <span class="count">{{ accountStore.accounts.length }}</span></h2>
-      <n-button secondary :loading="isSyncing" @click="handleSync()">
-        <template #icon><Icon name="material-symbols:cloud-sync-outline-rounded" /></template>
-        同步
-      </n-button>
+      <div class="account-sync-actions">
+        <n-button secondary :loading="accountStore.accountSyncLoading" :disabled="accountStore.courseSyncLoading" @click="handleSync()">
+          <template #icon>
+            <Icon name="material-symbols:cloud-sync-outline-rounded" />
+          </template>
+          同步账户信息
+        </n-button>
+        <n-button secondary :loading="accountStore.courseSyncLoading" :disabled="accountStore.accountSyncLoading || !accountStore.accounts.length" @click="handleSyncCourses()">
+          <template #icon>
+            <Icon name="material-symbols:cloud-sync-outline-rounded" />
+          </template>
+          同步课程
+        </n-button>
+      </div>
     </div>
 
     <ClientOnly>
@@ -91,3 +101,12 @@ onBeforeUnmount(() => {
     <AccountLoginModal v-model:show="showLoginModal" @success="showLoginModal = false" />
   </section>
 </template>
+
+<style scoped>
+.account-sync-actions {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+</style>

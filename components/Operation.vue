@@ -11,9 +11,6 @@ import type { QrJobView, QrStreamSnapshot, QrSubmitDecision } from '~/utils/qrSi
 
 const accountStore = useAccountStore()
 const logStore = useLogStore()
-const runtimeConfig = typeof useRuntimeConfig === 'function'
-  ? useRuntimeConfig()
-  : { public: {} }
 
 const accounts = toRef(accountStore, 'accounts')
 const selectAccounts = toRef(accountStore, 'selectAccounts')
@@ -56,11 +53,16 @@ const qrCodeResults = ref<QrFeedback[]>([])
 const showQrCodeModal = ref(false)
 const showCodeOrGestureModal = ref(false)
 const dynamicRefreshCode = ref(false)
-const retryFailedAvailable = ref(false)
-const autoSelectFailedOnRetry = computed(() => {
-  const value = runtimeConfig.public.qrCode?.autoSelectFailedOnRetry
-  return value !== false && value !== 'false'
-})
+const failedCourseSyncUids = computed(() => qrCodeResults.value.filter(item => item.status === 'error').map(item => item.uid))
+const courseSyncAvailable = computed(() => !qrCodeLoading.value && failedCourseSyncUids.value.length > 0)
+const retryFailedAvailable = courseSyncAvailable
+const courseSyncDisabled = computed(() => accountStore.accountSyncLoading || qrCodeResults.value.some(item => item.status === 'pending'))
+
+async function syncFailedCourses() {
+  if (!courseSyncAvailable.value || courseSyncDisabled.value)
+    return
+  await accountStore.syncCourses([...failedCourseSyncUids.value])
+}
 
 // 正在执行中的活动
 const doingActivity = ref<CX.ActivityItem | null>(null)
@@ -94,7 +96,6 @@ function applyQrJob(job: QrJobView) {
   row.message = differentActivity
     ? `先提交的活动 ${job.activityId}：${job.message}。你提交的活动 ${row.requestedActivityId} 尚未执行，请手动重新提交。`
     : qrJobFeedbackMessage(job, isOtherQrSignClient(job.clientId))
-  retryFailedAvailable.value = autoSelectFailedOnRetry.value && qrCodeResults.value.some(item => item.status === 'error')
 }
 
 function handleQrSnapshot(snapshot: QrStreamSnapshot) {
@@ -174,7 +175,6 @@ async function openQrCodeSignModal() {
 
   doingActivity.value = null
   qrCodeResults.value = []
-  retryFailedAvailable.value = false
   showQrCodeModal.value = true
 }
 
@@ -184,15 +184,10 @@ function toggleAllChecked() {
 }
 
 function handleRetryFailed() {
-  if (!autoSelectFailedOnRetry.value)
-    return
-
   const failedRows = qrCodeResults.value.filter(item => item.status === 'error')
   const failedUids = new Set(failedRows.map(item => item.uid))
-  if (failedUids.size === 0) {
-    retryFailedAvailable.value = false
+  if (failedUids.size === 0)
     return
-  }
 
   qrCodeResults.value = failedRows.map((item): QrFeedback => ({
     ...item,
@@ -205,15 +200,13 @@ function handleRetryFailed() {
   accountStore.accounts.forEach((account) => {
     account.selected = failedUids.has(account.uid)
   })
-  retryFailedAvailable.value = false
 }
 
 async function handleSuccess(result: string) {
-  if (qrCodeLoading.value || !qrSignSubmissionAllowed(qrOverlayMode.value))
+  if (qrCodeLoading.value || accountStore.courseSyncLoading || !qrSignSubmissionAllowed(qrOverlayMode.value))
     return
 
   const toAccounts = [...unref(selectAccounts)]
-  retryFailedAvailable.value = false
   if (toAccounts.length === 0) {
     return logStore.log('请先选择账号', { type: 'warning' })
   }
@@ -270,12 +263,11 @@ async function handleSuccess(result: string) {
   }))
   if (generation === qrModalGeneration) {
     qrCodeLoading.value = false
-    retryFailedAvailable.value = autoSelectFailedOnRetry.value && qrCodeResults.value.some(item => item.status === 'error')
   }
 }
 
 async function retryQrSubmission(row: QrFeedback) {
-  if (!row.retryUrl || row.status === 'pending' || qrCodeLoading.value)
+  if (!row.retryUrl || row.status === 'pending' || qrCodeLoading.value || accountStore.courseSyncLoading)
     return
   const url = row.retryUrl
   const activityId = parseQrCodeSignLink(url)?.activityId || ''
@@ -354,12 +346,12 @@ async function handleCodeOrGestureSignSuccess(result: string) {
         批量扫码
       </n-button>
     </div>
-    <QrCodeSignModal v-model:show="showQrCodeModal" :title="doingActivity?.course?.name ?? '批量扫码'" :loading="qrCodeLoading" :queue-overlay="qrOverlayMode" :dynamic-refresh-code="dynamicRefreshCode" :retry-failed-available="retryFailedAvailable" @success="handleSuccess" @retry-failed="handleRetryFailed">
+    <QrCodeSignModal v-model:show="showQrCodeModal" :title="doingActivity?.course?.name ?? '批量扫码'" :loading="qrCodeLoading" :queue-overlay="qrOverlayMode" :dynamic-refresh-code="dynamicRefreshCode" :retry-failed-available="retryFailedAvailable" :course-sync-available="courseSyncAvailable" :course-sync-loading="accountStore.courseSyncLoading" :course-sync-disabled="courseSyncDisabled" @sync-courses="syncFailedCourses" @success="handleSuccess" @retry-failed="handleRetryFailed">
       <template #result>
         <ul v-if="qrCodeResults.length" aria-label="各账号扫码结果" class="mb-3">
           <li v-for="item in qrCodeResults" :key="item.uid">
             <n-text :type="item.status === 'pending' ? 'info' : item.status">{{ item.time }} {{ item.name }} ({{ item.uid }}): {{ item.message }}</n-text>
-            <n-button v-if="item.retryUrl && item.status === 'error' && item.activityId && item.requestedActivityId !== item.activityId" size="small" :disabled="qrCodeLoading" @click="retryQrSubmission(item)">重新提交该 URL</n-button>
+            <n-button v-if="item.retryUrl && item.status === 'error' && item.activityId && item.requestedActivityId !== item.activityId" size="small" :disabled="qrCodeLoading || accountStore.courseSyncLoading" @click="retryQrSubmission(item)">重新提交该 URL</n-button>
           </li>
         </ul>
       </template>

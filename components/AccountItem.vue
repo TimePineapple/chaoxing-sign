@@ -38,6 +38,12 @@ interface QrFeedback {
 }
 const qrCodeResult = ref<QrFeedback | null>(null)
 const showQrCodeModal = ref(false)
+const courseSyncAvailable = computed(() => !qrCodeLoading.value && qrCodeResult.value?.status === 'error')
+async function syncFailedCourses() {
+  if (!courseSyncAvailable.value)
+    return
+  await accountStore.syncCourses([props.uid])
+}
 const { mode: qrOverlayMode, applyJob: applyOverlayJob, applySnapshot: applyOverlaySnapshot, reset: resetOverlay } = useQrSignOverlay(computed(() => [props.uid]))
 const showCodeOrGestureModal = ref(false)
 
@@ -175,7 +181,7 @@ function applyQrDecision(decision: QrSubmitDecision, url: string, requestedActiv
 }
 
 async function handleQrCodeSignSuccess(result: string) {
-  if (qrCodeLoading.value || !qrSignSubmissionAllowed(qrOverlayMode.value))
+  if (qrCodeLoading.value || accountStore.courseSyncLoading || !qrSignSubmissionAllowed(qrOverlayMode.value))
     return
 
   const requestedActivityId = new URL(result).searchParams.get('id') || ''
@@ -270,11 +276,11 @@ async function handleCodeOrGestureSignSuccess(result: string) {
           </div>
         </div>
       </template>
-      <QrCodeSignModal v-model:show="showQrCodeModal" :title="doingActivity?.course.name" :loading="qrCodeLoading" :queue-overlay="qrOverlayMode" @success="handleQrCodeSignSuccess">
+      <QrCodeSignModal v-model:show="showQrCodeModal" :title="doingActivity?.course.name" :loading="qrCodeLoading" :queue-overlay="qrOverlayMode" :course-sync-available="courseSyncAvailable" :course-sync-loading="accountStore.courseSyncLoading" :course-sync-disabled="accountStore.accountSyncLoading" @sync-courses="syncFailedCourses" @success="handleQrCodeSignSuccess">
         <template #result>
           <p v-if="qrCodeResult" role="status">
             <n-text :type="qrCodeResult.status === 'pending' ? 'info' : qrCodeResult.status">{{ qrCodeResult.time }} {{ info.realname }} ({{ uid }}): {{ qrCodeResult.message }}</n-text>
-            <n-button v-if="qrCodeResult.retryUrl && qrCodeResult.status === 'error' && qrCodeResult.activityId && qrCodeResult.requestedActivityId !== qrCodeResult.activityId" size="small" :disabled="qrCodeLoading" @click="retryQrSubmission">重新提交该 URL</n-button>
+            <n-button v-if="qrCodeResult.retryUrl && qrCodeResult.status === 'error' && qrCodeResult.activityId && qrCodeResult.requestedActivityId !== qrCodeResult.activityId" size="small" :disabled="qrCodeLoading || accountStore.courseSyncLoading" @click="retryQrSubmission">重新提交该 URL</n-button>
           </p>
         </template>
       </QrCodeSignModal>

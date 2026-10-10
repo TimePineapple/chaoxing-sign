@@ -142,6 +142,7 @@ it('shows the dynamic-code waiting hint and batch failures inside the real modal
   await Vue.nextTick()
   buttons().find(button => button.textContent?.includes('批量扫码'))!.click()
   await vi.waitFor(() => expect(document.querySelector('[data-testid="camera-frame"]')).not.toBeNull())
+  expect(document.querySelector('.qr-sync-courses')).toBeNull()
   await vi.waitFor(() => expect(locationRequests).toBeGreaterThan(requestsBeforeOpening))
   expect(document.querySelector('[data-testid="camera-frame"]')?.getAttribute('data-facing-mode')).toBe('environment')
   const cameraFrame = () => document.querySelector('[data-testid="camera-frame"]')
@@ -185,6 +186,29 @@ it('shows the dynamic-code waiting hint and batch failures inside the real modal
   expect(locationRequests).toBe(requestsBeforeSubmit)
   await vi.waitFor(() => expect(document.querySelector('[aria-label="各账号扫码结果"]')?.textContent).toContain('fixture-b (fixture-b): 模拟：登录已过期'))
   expect(document.querySelector('[role="dialog"]')?.textContent).not.toContain('批量扫码完成')
+  const feedback = document.querySelector('[aria-label="各账号扫码结果"]')!.textContent
+  let finishSync!: (value: unknown) => void
+  request.mockReturnValueOnce(new Promise((resolve) => {
+    finishSync = resolve
+  }))
+    .mockResolvedValueOnce({ code: 500, message: '模拟：课程同步失败', data: null })
+  document.querySelector<HTMLButtonElement>('.qr-sync-courses')!.click()
+  await vi.waitFor(() => expect(accounts.courseSyncLoading).toBe(true))
+  const rescan = () => buttons().find(button => button.textContent?.includes('重新扫描'))!
+  expect(rescan().disabled).toBe(true)
+  expect(buttons().find(button => button.textContent?.includes('选择图片'))!.disabled).toBe(true)
+  expect(document.querySelector<HTMLInputElement>('.qr-url-input input')!.disabled).toBe(true)
+  expect(document.querySelector('[aria-label="各账号扫码结果"]')!.textContent).toBe(feedback)
+  finishSync({ code: 200, data: [] })
+  await vi.waitFor(() => expect(accounts.courseSyncLoading).toBe(false))
+  expect(request.mock.calls.slice(2).map(([, options]) => options.params.uid)).toEqual(['fixture-a', 'fixture-b'])
+  expect(document.querySelector('[role="dialog"]')).not.toBeNull()
+  expect(document.querySelector('[aria-label="各账号扫码结果"]')!.textContent).toBe(feedback)
+  expect(rescan().disabled).toBe(false)
+  rescan().click()
+  await vi.waitFor(() => expect(document.querySelector('[data-testid="camera-frame"]')).not.toBeNull())
+  expect(document.querySelector('.qr-sync-courses')).toBeNull()
+  expect(accounts.selectAccounts.map(account => account.uid)).toEqual(['fixture-a', 'fixture-b'])
   expect(errors).toEqual([])
   app.unmount()
   app = undefined

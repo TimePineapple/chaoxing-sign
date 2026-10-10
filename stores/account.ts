@@ -20,6 +20,8 @@ export const useAccountStore = defineStore('account', () => {
   const selectAccounts = computed(() => accounts.value.filter(a => a.selected === true))
 
   const loading = ref(false)
+  const accountSyncLoading = ref(false)
+  const courseSyncLoading = ref(false)
   const { message: ms } = createDiscreteApi(['message'])
 
   const { log } = useLogStore()
@@ -42,10 +44,17 @@ export const useAccountStore = defineStore('account', () => {
   }
 
   async function syncAccounts() {
-    const { data } = await request('/api/cx/accounts')
-    accounts.value = data as unknown as Account[]
-
-    log('同步成功', { type: 'success' })
+    if (accountSyncLoading.value || courseSyncLoading.value)
+      return
+    accountSyncLoading.value = true
+    try {
+      const { data } = await request('/api/cx/accounts')
+      accounts.value = data as unknown as Account[]
+      log('账户信息同步成功', { type: 'success' })
+    }
+    finally {
+      accountSyncLoading.value = false
+    }
   }
 
   async function refreshRecentSigns() {
@@ -107,12 +116,46 @@ export const useAccountStore = defineStore('account', () => {
   async function getCourses(uid: string) {
     const account = getAccount(uid)
 
-    const { data } = await request('/api/cx/courses', { method: 'GET', params: { uid } })
+    const { code, message, data } = await request('/api/cx/courses', { method: 'GET', params: { uid } })
+    if (code !== 200 || !Array.isArray(data))
+      throw new Error(message || '课程接口返回异常，请稍后重试')
 
     account.courses = data
 
     log(`${account.info.realname} 课程获取成功`, { type: 'success' })
     return data
+  }
+
+  async function syncCourses(uids: string[]) {
+    if (courseSyncLoading.value || accountSyncLoading.value)
+      return []
+
+    const targets = [...new Set(uids)].map(uid => accounts.value.find(account => account.uid === uid))
+      .filter((account): account is Account => Boolean(account))
+      .map(account => ({ uid: account.uid, name: account.info?.realname || account.uid }))
+    const results: { uid: string; success: boolean }[] = []
+    if (!targets.length)
+      return results
+
+    courseSyncLoading.value = true
+    try {
+      for (const { uid, name } of targets) {
+        try {
+          await getCourses(uid)
+          results.push({ uid, success: true })
+        }
+        catch (error) {
+          const message = (error as { data?: { message?: string }; message?: string })?.data?.message
+            || (error as Error)?.message || '请求失败，请稍后重试'
+          log(`${name} (${uid}) 课程同步失败：${message}`, { type: 'error' })
+          results.push({ uid, success: false })
+        }
+      }
+      return results
+    }
+    finally {
+      courseSyncLoading.value = false
+    }
   }
 
   /*
@@ -334,6 +377,8 @@ export const useAccountStore = defineStore('account', () => {
     recentSigns: skipHydrate(recentSigns),
     selectAccounts,
     loading,
+    accountSyncLoading,
+    courseSyncLoading,
     login,
     logout,
     syncAccounts,
@@ -342,6 +387,7 @@ export const useAccountStore = defineStore('account', () => {
     getAccount,
     setAccount,
     getCourses,
+    syncCourses,
     getActivityList,
     signByCourse,
     signByActivity,
