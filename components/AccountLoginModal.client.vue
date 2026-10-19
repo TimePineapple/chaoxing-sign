@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import type { FormInst, FormItemRule, FormRules } from 'naive-ui'
 
+const props = defineProps<{ account?: { uid: string; username: string } }>()
+
 const emit = defineEmits< {
   (e: 'success', name: string): void
 }>()
@@ -14,6 +16,11 @@ const form = reactive({
   username: '',
   password: '',
 })
+watch(() => props.account, (account) => {
+  form.username = account?.username || ''
+  form.password = ''
+  errorMessage.value = ''
+}, { immediate: true })
 
 const rules: FormRules = {
   username: [
@@ -48,15 +55,17 @@ async function addAccount() {
     return
   }
 
-  if (accountStore.accounts?.some(a => a.username === form.username)) {
+  if (!props.account && accountStore.accounts?.some(a => a.username === form.username)) {
     errorMessage.value = '账号已存在，无需添加'
     return
   }
 
   loading.value = true
-  let account: Awaited<ReturnType<typeof accountStore.login>>
+  let account: { info: { realname?: string } }
   try {
-    account = await accountStore.login(form)
+    account = props.account
+      ? await accountStore.relogin(props.account.uid, form.password)
+      : await accountStore.login(form)
   }
   catch (error) {
     const failure = error as { data?: { message?: string }, response?: { _data?: { message?: string } }, message?: string }
@@ -68,7 +77,8 @@ async function addAccount() {
   }
 
   emit('success', account.info.realname || form.username)
-  form.username = ''
+  if (!props.account)
+    form.username = ''
   form.password = ''
   await navigateTo('/')
 }
@@ -76,15 +86,16 @@ async function addAccount() {
 
 <template>
   <n-modal
-    :mask-closable="true"
+    :mask-closable="!loading"
+    :close-on-esc="!loading"
     preset="card"
     size="large"
     :bordered="false"
     :closable="false"
     class="mobile-sheet"
-    title="添加某星账号"
+    :title="account ? '重新登录学习通账号' : '添加某星账号'"
     transform-origin="bottom"
-    @after-leave="errorMessage = ''"
+    @after-leave="errorMessage = ''; form.password = ''"
   >
     <n-spin :show="loading">
       <n-form ref="formRef" :model="form" :rules="rules" :show-label="false">
@@ -92,7 +103,7 @@ async function addAccount() {
           <img src="/img/cx.png" alt="cx">
         </div>
         <n-form-item label="账号" path="username">
-          <n-input v-model:value="form.username" placeholder="账号">
+          <n-input v-model:value="form.username" placeholder="账号" :disabled="Boolean(account) || loading">
             <template #prefix>
               <i i-ri:user-3-line />
             </template>
@@ -113,7 +124,7 @@ async function addAccount() {
             </template>
           </n-input>
         </n-form-item>
-        <n-alert v-if="errorMessage" type="error" title="添加失败" class="mb-4" role="alert">
+        <n-alert v-if="errorMessage" type="error" :title="account ? '重新登录失败' : '添加失败'" class="mb-4" role="alert">
           {{ errorMessage }}
         </n-alert>
         <n-form-item>

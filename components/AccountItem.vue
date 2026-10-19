@@ -19,6 +19,7 @@ const props = defineProps<{
   selected?: boolean
   lastLoginTime: string
   recentSign?: RecentSign
+  loginExpired?: boolean
 }>()
 
 const emit = defineEmits<{ (e: 'click'): void }>()
@@ -27,6 +28,22 @@ const accountStore = useAccountStore()
 
 const loading = ref(false)
 const qrCodeLoading = ref(false)
+const showReloginModal = ref(false)
+const renewLoading = ref(false)
+const renewError = ref('')
+const reloginAccount = computed(() => ({ uid: props.uid, username: props.username || props.info.username }))
+async function tryRenewSession() {
+  if (renewLoading.value || showReloginModal.value)
+    return
+  renewLoading.value = true
+  renewError.value = ''
+  try { await accountStore.relogin(props.uid) }
+  catch (error) {
+    const failure = error as { data?: { message?: string }; message?: string }
+    renewError.value = failure?.data?.message || failure?.message || '自动续登失败，请手动重新登录'
+  }
+  finally { renewLoading.value = false }
+}
 interface QrFeedback {
   time: string
   status: 'pending' | 'success' | 'error'
@@ -35,10 +52,12 @@ interface QrFeedback {
   activityId?: string
   requestedActivityId?: string
   retryUrl?: string
+  errorCode?: string
 }
 const qrCodeResult = ref<QrFeedback | null>(null)
 const showQrCodeModal = ref(false)
-const courseSyncAvailable = computed(() => !qrCodeLoading.value && qrCodeResult.value?.status === 'error')
+const courseSyncAvailable = computed(() => !props.loginExpired && !qrCodeLoading.value
+  && qrCodeResult.value?.status === 'error' && qrCodeResult.value.errorCode !== 'CX_SESSION_EXPIRED')
 async function syncFailedCourses() {
   if (!courseSyncAvailable.value)
     return
@@ -92,6 +111,7 @@ function applyQrJob(job: QrJobView) {
     message: differentActivity
       ? `先提交的活动 ${job.activityId}：${job.message}。你提交的活动 ${current?.requestedActivityId} 尚未执行，请手动重新提交。`
       : qrJobFeedbackMessage(job, otherClient),
+    errorCode: job.errorCode,
   }
 }
 
@@ -181,7 +201,7 @@ function applyQrDecision(decision: QrSubmitDecision, url: string, requestedActiv
 }
 
 async function handleQrCodeSignSuccess(result: string) {
-  if (qrCodeLoading.value || accountStore.courseSyncLoading || !qrSignSubmissionAllowed(qrOverlayMode.value))
+  if (props.loginExpired || qrCodeLoading.value || accountStore.courseSyncLoading || !qrSignSubmissionAllowed(qrOverlayMode.value))
     return
 
   const requestedActivityId = new URL(result).searchParams.get('id') || ''
@@ -242,9 +262,9 @@ async function handleCodeOrGestureSignSuccess(result: string) {
 
 <template>
   <n-spin :show="loading">
-    <n-card class="account-card" :class="{ 'account-card-selected': selected }" @click="emit('click')">
+    <n-card class="account-card" :class="{ 'account-card-selected': selected && !loginExpired, 'account-card-expired': loginExpired }" @click="!loginExpired && emit('click')">
       <template #header>
-        <div class="account-identity">
+        <div class="account-identity" :inert="loginExpired || undefined" :aria-hidden="loginExpired || undefined">
           <n-avatar :size="44" :src="info.avatar" round />
           <div class="account-person">
             <h3>{{ info.realname }}</h3>
@@ -256,7 +276,7 @@ async function handleCodeOrGestureSignSuccess(result: string) {
         </div>
       </template>
 
-      <div class="account-meta">
+      <div class="account-meta" :inert="loginExpired || undefined" :aria-hidden="loginExpired || undefined">
         <p>
           最近登录时间: {{ useDateFormat(lastLoginTime, 'YYYY-MM-DD HH:mm:ss').value }}
         </p>
@@ -265,8 +285,17 @@ async function handleCodeOrGestureSignSuccess(result: string) {
         </p>
       </div>
 
+      <div v-if="loginExpired" class="account-expired-overlay" @click.stop>
+        <p class="account-expired-message" role="status">登陆状态失效，请重新登录</p>
+        <div class="account-expired-actions">
+          <n-button type="primary" :disabled="renewLoading || showReloginModal" @click="renewError = ''; showReloginModal = true">重新登录</n-button>
+          <n-button secondary :loading="renewLoading" :disabled="renewLoading || showReloginModal" @click="tryRenewSession">尝试自动续登</n-button>
+        </div>
+        <p v-if="renewError" class="account-renew-error" role="alert">{{ renewError }}</p>
+      </div>
+
       <template #action>
-        <div class="account-actions" @click.stop>
+        <div class="account-actions" :inert="loginExpired || undefined" :aria-hidden="loginExpired || undefined" @click.stop>
           <div class="account-action-layout">
             <n-button class="account-scan-button" type="primary" @click="qrCodeResult = null; showQrCodeModal = true"><template #icon><Icon name="mdi:qrcode-scan" /></template>扫码签到</n-button>
             <div class="account-mini-actions">
@@ -280,13 +309,14 @@ async function handleCodeOrGestureSignSuccess(result: string) {
         <template #result>
           <p v-if="qrCodeResult" role="status">
             <n-text :type="qrCodeResult.status === 'pending' ? 'info' : qrCodeResult.status">{{ qrCodeResult.time }} {{ info.realname }} ({{ uid }}): {{ qrCodeResult.message }}</n-text>
-            <n-button v-if="qrCodeResult.retryUrl && qrCodeResult.status === 'error' && qrCodeResult.activityId && qrCodeResult.requestedActivityId !== qrCodeResult.activityId" size="small" :disabled="qrCodeLoading || accountStore.courseSyncLoading" @click="retryQrSubmission">重新提交该 URL</n-button>
+            <n-button v-if="!loginExpired && qrCodeResult.retryUrl && qrCodeResult.status === 'error' && qrCodeResult.errorCode !== 'CX_SESSION_EXPIRED' && qrCodeResult.activityId && qrCodeResult.requestedActivityId !== qrCodeResult.activityId" size="small" :disabled="qrCodeLoading || accountStore.courseSyncLoading" @click="retryQrSubmission">重新提交该 URL</n-button>
           </p>
         </template>
       </QrCodeSignModal>
       <CodeOrGestureSignModal v-model:show="showCodeOrGestureModal" :activity="doingActivity!" :loading="loading" @success="handleCodeOrGestureSignSuccess" />
       <SignHistory v-model:show="showSignHistory" :uid="uid" />
       <SettingModal v-if="showSettingModal" v-model:show="showSettingModal" :uid="uid" :setting="setting" />
+      <AccountLoginModal v-if="showReloginModal" v-model:show="showReloginModal" :account="reloginAccount" @success="showReloginModal = false" />
     </n-card>
     <template #description>
       马上就好...

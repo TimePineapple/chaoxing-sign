@@ -38,6 +38,8 @@ function refreshWhenVisible() {
 }
 
 async function selectAccount(account: Account) {
+  if (account.loginExpired)
+    return
   account.selected = !account.selected
 }
 
@@ -48,6 +50,7 @@ tryOnMounted(() => {
   closeRecentSignEvents = connectRecentSignEvents(
     event => accountStore.applyRecentSign(event),
     refreshWhenVisible,
+    event => accountStore.applyAccountSession(event),
   )
   document.addEventListener('visibilitychange', refreshWhenVisible)
   window.addEventListener('focus', refreshWhenVisible)
@@ -82,7 +85,7 @@ onBeforeUnmount(() => {
     <ClientOnly>
       <template v-if=" accountStore.accounts?.length! > 0">
         <div class="account-stack">
-          <AccountItem v-for="account in accountStore.accounts" v-bind="pick(account, ['uid', 'info', 'lastLoginTime', 'selected', 'setting'])" :key="account.uid" :recent-sign="accountStore.recentSigns[account.uid]" @click="selectAccount(account)" />
+          <AccountItem v-for="account in accountStore.accounts" v-bind="pick(account, ['uid', 'username', 'info', 'lastLoginTime', 'selected', 'setting', 'loginExpired'])" :key="account.uid" :recent-sign="accountStore.recentSigns[account.uid]" @click="selectAccount(account)" />
           <n-button class="add-account-button" block dashed @click="showLoginModal = true">
             <template #icon><Icon name="ic:outline-add-box" /></template>
             添加账号

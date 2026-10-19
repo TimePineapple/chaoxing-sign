@@ -48,7 +48,7 @@ describe('QR event stream', () => {
     const aJobs = a.messages.filter((item: any) => item.event === 'job').map((item: any) => JSON.parse(item.data))
     expect(aJobs.map((item: any) => item.state)).toEqual(['queued', 'running', 'success'])
     expect(b.messages.filter((item: any) => item.event === 'job')).toEqual([])
-    expect(JSON.parse(b.messages.find((item: any) => item.event === 'snapshot').data)).toEqual({ active: [] })
+    expect(JSON.parse(b.messages.find((item: any) => item.event === 'snapshot').data)).toEqual({ active: [], recentSuccess: [] })
     a.close()
     b.close()
   })

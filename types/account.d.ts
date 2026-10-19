@@ -9,6 +9,7 @@ export interface Account {
   courses: CX.Course[]
   activities: Activity[]
   selected: boolean
+  loginExpired?: boolean
 }
 
 export interface Setting extends CX.Setting {
@@ -20,10 +21,10 @@ export interface Course extends CX.Course {
   isLoadActivity?: boolean
 }
 
-export interface Activity extends CX.ActivityItem & CX.Course {}
+export interface Activity extends CX.ActivityItem, CX.Course {}
 
 export interface History {
-  id: stringÏ
+  id: string
   activityName: string
   type: number
 }

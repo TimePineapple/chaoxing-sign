@@ -7,6 +7,7 @@ import { safeQrContentType, summarizeQrUpstreamBody } from '~/server/utils/qrUps
 import type { QrCoordinates } from '~/utils/qrLocation'
 import { createSignLog } from '~/server/utils/createSignLog'
 import { resolveQrCourseSlot } from '~/server/utils/qrCourseSlot'
+import { CxSessionExpiredError } from '~/server/protocol/cx/session'
 
 export interface QrSignInput {
   uid: string
@@ -262,6 +263,8 @@ export async function executeQrSign(
     return { result, activityName: activity.name, courseName }
   }
   catch (error) {
+    if (error instanceof CxSessionExpiredError)
+      throw error
     const failure = error as { code?: string; response?: { statusCode?: number; headers?: Record<string, unknown>; body?: unknown } }
     const code = error instanceof QrSignExecutionError ? error.code
       : typeof failure?.code === 'string' && /^[A-Z0-9_]{1,64}$/.test(failure.code)

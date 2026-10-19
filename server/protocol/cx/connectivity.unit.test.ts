@@ -1,6 +1,7 @@
 import { createServer, type Server } from 'node:http'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { checkCxConnectivity, cxConnectivityErrorMessage, CX_LOGIN_PAGE_URL } from './connectivity'
+import { CX_REQUEST_INTERVAL_MIN_MS } from '~/server/utils/cxRequestInterval'
 import { Cx } from './index'
 import { CxProxyError } from './proxy'
 
@@ -88,6 +89,6 @@ describe('learning service connectivity check', () => {
     await first
     expect(secondResult).toEqual({ ok: true })
     expect(started).toHaveLength(2)
-    expect(started[1] - started[0]).toBeGreaterThanOrEqual(190)
+    expect(started[1] - started[0]).toBeGreaterThanOrEqual(CX_REQUEST_INTERVAL_MIN_MS - 10)
   })
 })

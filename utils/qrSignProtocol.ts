@@ -9,6 +9,7 @@ export interface QrJobView {
   completedAt?: number
   state: QrJobState
   message: string
+  errorCode?: string
   result?: string
   activityName?: string
   courseName?: string

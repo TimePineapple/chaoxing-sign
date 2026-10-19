@@ -57,7 +57,7 @@ export class QrSignQueue {
   private view(job: QrJobView): QrJobView {
     return { id: job.id, uid: job.uid, activityId: job.activityId, clientId: job.clientId,
       submittedAt: job.submittedAt, completedAt: job.completedAt, state: job.state,
-      message: safeText(job.message) || '', result: safeText(job.result),
+      message: safeText(job.message) || '', result: safeText(job.result), errorCode: job.errorCode,
       activityName: safeText(job.activityName), courseName: safeText(job.courseName) }
   }
 
@@ -145,6 +145,7 @@ export class QrSignQueue {
         : typeof failure?.code === 'string' && /^[A-Z0-9_]{1,64}$/.test(failure.code)
           ? failure.code : 'UNKNOWN_ERROR'
       job.state = 'error'
+      job.errorCode = code
       job.message = failure?.message === 'QR_TASK_TIMEOUT'
         ? TIMEOUT_MESSAGE
         : failure?.publicMessage || `扫码失败（${code}），请查看服务端日志`

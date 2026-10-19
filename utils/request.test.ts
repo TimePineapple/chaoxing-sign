@@ -21,3 +21,21 @@ it('keeps the QR client and trace headers through the request hook', async () =>
   expect(options.headers.get('x-qr-sign-trace-id')).toBe('trace-1')
   vi.unstubAllGlobals()
 })
+
+it('applies account-session failures without confusing them with the website login', async () => {
+  const applyAccountSession = vi.fn()
+  let config: any
+  vi.stubGlobal('$fetch', { create: (value: any) => { config = value; return vi.fn() } })
+  vi.stubGlobal('useAccountStore', () => ({ applyAccountSession }))
+  vi.resetModules()
+  try {
+    await import('./request')
+    const state = { code: 'CX_SESSION_EXPIRED', uid: 'cx-a', lastLoginTime: '2026-10-01T00:00:00.000Z' }
+    await config.onResponseError({ response: { _data: { message: '登陆状态失效，请重新登录', data: state } }, options: { params: { noMessage: true } } })
+    expect(applyAccountSession).toHaveBeenCalledWith({ uid: 'cx-a', loginExpired: true, lastLoginTime: state.lastLoginTime })
+    applyAccountSession.mockClear()
+    await config.onResponseError({ response: { _data: { message: '网站登录已过期' } }, options: { params: { noMessage: true } } })
+    expect(applyAccountSession).not.toHaveBeenCalled()
+  }
+  finally { vi.unstubAllGlobals() }
+})

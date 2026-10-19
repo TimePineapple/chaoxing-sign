@@ -41,3 +41,21 @@ it('rejects unauthenticated subscribers and broadcasts to every client of the ow
     b.close()
   }
 })
+
+it('sends persisted session state on connection and isolates subsequent session events by owner', async () => {
+  const handler = (await import('../server/api/cx/recent-sign-events.get')).default
+  const { accountSessionBus } = await import('../server/utils/accountSessionBus')
+  const state = { uid: 'cx-a', loginExpired: true, lastLoginTime: '2026-10-01T00:00:00.000Z' }
+  const findMany = vi.fn().mockResolvedValue([{ uid: 'cx-a', info: { logged: false }, lastLoginTime: new Date(state.lastLoginTime) }])
+  const own = await handler({ session: { uid: 'web-a' }, context: { prisma: { cxAccount: { findMany } } } } as any) as any
+  const other = await handler({ session: { uid: 'web-b' }, context: { prisma: { cxAccount: { findMany: vi.fn().mockResolvedValue([]) } } } } as any) as any
+  try {
+    await vi.waitFor(() => expect(own.messages).toHaveLength(1))
+    expect(own.messages[0]).toMatchObject({ event: 'account-session', data: JSON.stringify(state) })
+    accountSessionBus.publish('web-a', { ...state, loginExpired: false })
+    await vi.waitFor(() => expect(own.messages).toHaveLength(2))
+    expect(other.messages).toEqual([])
+    expect(findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { userId: 'web-a' } }))
+  }
+  finally { own.close(); other.close() }
+})

@@ -136,6 +136,15 @@ describe('server-wide QR queue', () => {
     expect(queue.snapshot('web-a')).toEqual({ active: [], recentSuccess: [] })
   })
 
+  it('publishes a distinct login-expired code and message for the client', async () => {
+    const queue = new QrSignQueue()
+    queue.submit({ ownerId: 'web-a', uid: 'cx-a', activityId: '10', run: async () => {
+      throw { code: 'CX_SESSION_EXPIRED', publicMessage: '登陆状态失效，请重新登录' }
+    } })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(queue.replay('web-a', 0).at(-1)).toMatchObject({ state: 'error', errorCode: 'CX_SESSION_EXPIRED', message: '登陆状态失效，请重新登录' })
+  })
+
   it('does not include links or QR tokens in client events', async () => {
     const queue = new QrSignQueue()
     const received: string[] = []

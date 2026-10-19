@@ -2,6 +2,8 @@ import { Cookie } from 'tough-cookie'
 import { CXMap, Cx } from '~~/server/protocol/cx'
 import { prisma } from '~~/server/utils/db'
 import { getQrSignTraceId, isQrSignRequest } from '~/server/utils/qrSignTrace'
+import { bindCxSession } from '~/server/utils/cxSession'
+import { CxSessionExpiredError } from '~/server/protocol/cx/session'
 
 declare module 'h3' {
   interface H3EventContext {
@@ -18,7 +20,10 @@ export default eventHandler(async (event) => {
     if (req.url?.startsWith('/api/auth'))
       return
 
-    if (exclude.includes(req.url))
+    if (exclude.includes(req.url || ''))
+      return
+
+    if (/^\/api\/cx\/accounts\/[^/?]+\/relogin(?:\?|$)/.test(req.url || ''))
       return
 
     if (!req.url?.startsWith('/api/cx'))
@@ -28,13 +33,13 @@ export default eventHandler(async (event) => {
       console.info(`[qr-code-sign][${traceId}] account context start`)
 
     const method = req.method
-    let uid = 0
+    let uid: string = ''
 
     if (method === 'GET')
-      uid = context.params?.uid || getQuery(event)?.uid
+      uid = String(context.params?.uid || getQuery(event)?.uid || '')
 
     else
-      uid = (await readBody(event))?.uid as string
+      uid = String((await readBody(event))?.uid || '')
 
     if (!uid) {
       if (traceId)
@@ -63,6 +68,7 @@ export default eventHandler(async (event) => {
 
       const cx = new Cx(account!.info as unknown as CX.User)
       cx.setting = account?.setting as unknown as CX.Setting
+      bindCxSession(cx, account, prisma)
 
       for (const cookieStr of account!.cookies) {
         const cookie = Cookie.fromJSON(cookieStr as object)
@@ -79,6 +85,9 @@ export default eventHandler(async (event) => {
     }
   }
   catch (error: any) {
+    if (error instanceof CxSessionExpiredError)
+      throw createError({ statusCode: 409, message: error.publicMessage,
+        data: { code: error.code, uid: error.uid } })
     if (traceId) {
       const code = typeof error?.code === 'string' && /^[A-Z0-9_]{1,64}$/.test(error.code) ? error.code : 'UNKNOWN_ERROR'
       console.error(`[qr-code-sign][${traceId}] account context failed`, { code })

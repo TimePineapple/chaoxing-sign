@@ -7,6 +7,7 @@ import { CookieJar } from 'tough-cookie'
 import * as cheerio from 'cheerio'
 import got from 'got'
 import { CxProxyError, getCxProxyOptions } from './proxy'
+import { CxSessionExpiredError, isCxLoginHtml, isCxLoginUrl } from './session'
 import { cxRequestStartQueue } from '~/server/utils/cxRequestStartQueue'
 import { qrCookieSnapshot, qrSetCookieNames, safeQrContentType, summarizeQrCookieChanges, summarizeQrUpstreamBody } from '~/server/utils/qrUpstreamFeedback'
 import { resolveClientSignLocation } from '~/server/utils/resolveClientSignLocation'
@@ -73,6 +74,20 @@ export class Cx {
   public user!: CX.User
   public setting!: CX.Setting
   public courseList: CX.Course[] = []
+  public sessionLoginTime?: string
+  public onSessionExpired?: () => Promise<void>
+  private authenticating = false
+
+  private async recordExpiredSession() {
+    this.user.logged = false
+    try { await this.onSessionExpired?.() }
+    catch { console.warn('[cx.session]', { code: 'SESSION_STATE_SAVE_FAILED' }) }
+  }
+
+  private async expireSession(): Promise<never> {
+    await this.recordExpiredSession()
+    throw new CxSessionExpiredError(String(this.user.uid || ''), this.sessionLoginTime)
+  }
 
   constructor(user: Partial<CX.User>) {
     this.cookieJar = new CookieJar()
@@ -84,10 +99,35 @@ export class Cx {
       cookieJar: this.cookieJar,
       hooks: {
         ...proxyOptions.hooks,
-        beforeRequest: [options => cxRequestStartQueue.waitTurn(options.signal)],
+        beforeError: [
+          async (error) => {
+            if (!this.authenticating && (error.code === 'CX_SESSION_EXPIRED'
+              || isCxLoginUrl(error.response?.url || '')
+              || isCxLoginHtml(error.response?.rawBody?.toString()))) {
+              await this.recordExpiredSession()
+              return new CxSessionExpiredError(String(this.user.uid || ''), this.sessionLoginTime)
+            }
+            return error
+          },
+          ...(proxyOptions.hooks?.beforeError || []),
+          error => error.code === 'CX_SESSION_EXPIRED'
+            ? new CxSessionExpiredError(String(this.user.uid || ''), this.sessionLoginTime)
+            : error,
+        ],
+        beforeRequest: [async (options) => {
+          if (!this.authenticating && this.user.logged === false)
+            await this.expireSession()
+          await cxRequestStartQueue.waitTurn(options.signal)
+        }],
+        beforeRedirect: [async (options) => {
+          if (!this.authenticating && isCxLoginUrl(options.url))
+            await this.expireSession()
+        }],
         afterResponse: [
-          (response) => {
+          async (response) => {
             this.currentUrl = response.url
+            if (!this.authenticating && (isCxLoginUrl(response.url) || isCxLoginHtml(response.body)))
+              await this.expireSession()
             return response
           },
         ],
@@ -125,6 +165,7 @@ export class Cx {
   }
 
   async login(): Promise<string | null> {
+    this.authenticating = true
     this.user.logged = false
     let stage: '认证' | '读取资料' = '认证'
     try {
@@ -170,6 +211,9 @@ export class Cx {
       if (error instanceof CxProxyError && code.startsWith('ERR_CX_PROXY_'))
         throw error
       throw new CxLoginError(stage, code)
+    }
+    finally {
+      this.authenticating = false
     }
   }
 
@@ -774,8 +818,8 @@ export class Cx {
   }
 }
 
-export const CXMap = new Map<string | number, Cx>()
+export const CXMap = new Map<string, Cx>()
 
-export const getCx = (uid: string | number) => CXMap.get(uid)
+export const getCx = (uid: string | number) => CXMap.get(String(uid))
 
-export const setCx = (uid: string | number, cx: Cx) => CXMap.set(uid, cx)
+export const setCx = (uid: string | number, cx: Cx) => CXMap.set(String(uid), cx)

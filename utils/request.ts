@@ -17,6 +17,11 @@ const _fetch = $fetch.create({
   async onResponse() {
   },
   async onResponseError({ response, options }) {
+    const state = response._data?.data
+    if (state?.code === 'CX_SESSION_EXPIRED' && state.uid && state.lastLoginTime
+      && typeof useAccountStore !== 'undefined') {
+      useAccountStore().applyAccountSession({ uid: state.uid, loginExpired: true, lastLoginTime: state.lastLoginTime })
+    }
     options?.params?.noMessage || message.error(response._data.message || '服务器错误')
   },
 })

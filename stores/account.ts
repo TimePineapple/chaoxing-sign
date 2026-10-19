@@ -4,6 +4,7 @@ import { signTypeMap } from '~/constants/cx'
 import type { Body as LoginForm } from '~/server/api/cx/login.post'
 import type { Account, Activity, Course, Setting } from '~/types/account'
 import type { RecentSign, RecentSignEvent } from '~/types/recentSign'
+import type { AccountRecoveryResult, AccountSessionEvent } from '~/types/accountSession'
 import { createQrSignTraceId, parseQrCodeSignLink } from '~/utils/qrCodeSign'
 import type { QrSubmitDecision } from '~/utils/qrSignProtocol'
 import type { QrCoordinates } from '~/utils/qrLocation'
@@ -17,7 +18,30 @@ export const useAccountStore = defineStore('account', () => {
   let pushGeneration = 0
   const pushedAtGeneration = new Map<string, number>()
 
-  const selectAccounts = computed(() => accounts.value.filter(a => a.selected === true))
+  const selectAccounts = computed(() => accounts.value.filter(a => a.selected === true && !a.loginExpired))
+  const sessionStates = new Map<string, AccountSessionEvent>()
+  const renewingUids = new Set<string>()
+
+  function applyAccountSession(event: AccountSessionEvent) {
+    if (!event?.uid || typeof event.loginExpired !== 'boolean' || !Number.isFinite(Date.parse(event.lastLoginTime)))
+      return
+    const previous = sessionStates.get(event.uid)
+    if (previous && Date.parse(previous.lastLoginTime) > Date.parse(event.lastLoginTime))
+      return
+    if (previous?.loginExpired && !event.loginExpired && previous.lastLoginTime === event.lastLoginTime)
+      event = previous
+    const account = accounts.value.find(item => item.uid === event.uid)
+    if (account && Date.parse(account.lastLoginTime) > Date.parse(event.lastLoginTime))
+      return
+    sessionStates.set(event.uid, event)
+    if (account) {
+      account.loginExpired = event.loginExpired
+      account.info.logged = !event.loginExpired
+      if (event.loginExpired)
+        account.selected = false
+      account.lastLoginTime = event.lastLoginTime
+    }
+  }
 
   const loading = ref(false)
   const accountSyncLoading = ref(false)
@@ -50,6 +74,13 @@ export const useAccountStore = defineStore('account', () => {
     try {
       const { data } = await request('/api/cx/accounts')
       accounts.value = data as unknown as Account[]
+      for (const account of accounts.value) {
+        const state = sessionStates.get(account.uid)
+        if (state)
+          applyAccountSession(state)
+        if (account.loginExpired)
+          account.selected = false
+      }
       log('账户信息同步成功', { type: 'success' })
     }
     finally {
@@ -89,13 +120,40 @@ export const useAccountStore = defineStore('account', () => {
 
     log(`${data.info.username || form.username} ${data.info.realname} ${message}`, { type: 'success' })
 
-    accounts.value.push({
+    const existing = accounts.value.findIndex(account => account.uid === data.uid)
+    const next = {
       ...data,
-      courses: [],
-      selected: true,
-    } as unknown as Account)
+      courses: existing >= 0 ? accounts.value[existing].courses : [],
+      selected: existing < 0,
+      loginExpired: false,
+    } as unknown as Account
+    if (existing >= 0)
+      accounts.value[existing] = next
+    else
+      accounts.value.push(next)
+    applyAccountSession({ uid: data.uid, loginExpired: false, lastLoginTime: data.lastLoginTime })
 
     return data
+  }
+
+  async function relogin(uid: string, password?: string) {
+    if (renewingUids.has(uid))
+      throw new Error('该账号正在重新登录，请稍候')
+    renewingUids.add(uid)
+    try {
+      const endpoint: string = `/api/cx/accounts/${encodeURIComponent(uid)}/relogin`
+      const { code, message, data } = await request<{ code: number; message: string; data: AccountRecoveryResult }>(endpoint, {
+        method: 'POST', body: { uid, mode: password === undefined ? 'saved' : 'manual',
+          ...(password === undefined ? {} : { password }) },
+      })
+      if (code !== 200 || data?.uid !== uid)
+        throw new Error(message || '重新登录失败，请稍后重试')
+      const account = getAccount(uid)
+      Object.assign(account, data, { courses: data.courses || account.courses, selected: false, loginExpired: false })
+      applyAccountSession({ uid, loginExpired: false, lastLoginTime: data.lastLoginTime })
+      return data
+    }
+    finally { renewingUids.delete(uid) }
   }
 
   async function logout(uid: string) {
@@ -106,6 +164,7 @@ export const useAccountStore = defineStore('account', () => {
     accounts.value = accounts.value.filter(a => a.uid !== uid)
     delete recentSigns.value[uid]
     pushedAtGeneration.delete(uid)
+    sessionStates.delete(uid)
 
     log(`${account.info.realname} 退出成功`, { type: 'success' })
   }
@@ -115,6 +174,8 @@ export const useAccountStore = defineStore('account', () => {
   */
   async function getCourses(uid: string) {
     const account = getAccount(uid)
+    if (account.loginExpired)
+      throw new Error('登陆状态失效，请重新登录')
 
     const { code, message, data } = await request('/api/cx/courses', { method: 'GET', params: { uid } })
     if (code !== 200 || !Array.isArray(data))
@@ -131,7 +192,7 @@ export const useAccountStore = defineStore('account', () => {
       return []
 
     const targets = [...new Set(uids)].map(uid => accounts.value.find(account => account.uid === uid))
-      .filter((account): account is Account => Boolean(account))
+      .filter((account): account is Account => Boolean(account) && !account!.loginExpired)
       .map(account => ({ uid: account.uid, name: account.info?.realname || account.uid }))
     const results: { uid: string; success: boolean }[] = []
     if (!targets.length)
@@ -387,6 +448,8 @@ export const useAccountStore = defineStore('account', () => {
     getAccount,
     setAccount,
     getCourses,
+    relogin,
+    applyAccountSession,
     syncCourses,
     getActivityList,
     signByCourse,

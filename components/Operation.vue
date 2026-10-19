@@ -14,25 +14,26 @@ const logStore = useLogStore()
 
 const accounts = toRef(accountStore, 'accounts')
 const selectAccounts = toRef(accountStore, 'selectAccounts')
+const eligibleAccounts = computed(() => accounts.value.filter(account => !account.loginExpired))
 const { mode: qrOverlayMode, applyJob: applyOverlayJob, applySnapshot: applyOverlaySnapshot, reset: resetOverlay } = useQrSignOverlay(computed(() => selectAccounts.value.map(account => account.uid)))
 
 const isAllChecked = ref(false)
 const indeterminate = computed(() => {
-  return selectAccounts.value.length > 0 && selectAccounts.value.length < accounts.value.length
+  return selectAccounts.value.length > 0 && selectAccounts.value.length < eligibleAccounts.value.length
 })
 
 function handleCheckedChange() {
   accountStore.accounts.forEach((account) => {
-    account.selected = isAllChecked.value
+    account.selected = !account.loginExpired && isAllChecked.value
   })
 }
 
 onMounted(() => {
-  isAllChecked.value = selectAccounts.value.length === accounts.value.length && accounts.value.length > 0
+  isAllChecked.value = selectAccounts.value.length === eligibleAccounts.value.length && eligibleAccounts.value.length > 0
 })
 
 watch(selectAccounts, () => {
-  isAllChecked.value = selectAccounts.value.length === accounts.value.length && accounts.value.length > 0
+  isAllChecked.value = selectAccounts.value.length === eligibleAccounts.value.length && eligibleAccounts.value.length > 0
 })
 
 const loading = ref(false)
@@ -48,12 +49,15 @@ interface QrFeedback {
   activityId?: string
   requestedActivityId?: string
   retryUrl?: string
+  errorCode?: string
 }
 const qrCodeResults = ref<QrFeedback[]>([])
 const showQrCodeModal = ref(false)
 const showCodeOrGestureModal = ref(false)
 const dynamicRefreshCode = ref(false)
-const failedCourseSyncUids = computed(() => qrCodeResults.value.filter(item => item.status === 'error').map(item => item.uid))
+const failedCourseSyncUids = computed(() => qrCodeResults.value.filter(item => item.status === 'error'
+  && item.errorCode !== 'CX_SESSION_EXPIRED'
+  && !accounts.value.find(account => account.uid === item.uid)?.loginExpired).map(item => item.uid))
 const courseSyncAvailable = computed(() => !qrCodeLoading.value && failedCourseSyncUids.value.length > 0)
 const retryFailedAvailable = courseSyncAvailable
 const courseSyncDisabled = computed(() => accountStore.accountSyncLoading || qrCodeResults.value.some(item => item.status === 'pending'))
@@ -73,7 +77,7 @@ function applyQrJob(job: QrJobView) {
   if (!showQrCodeModal.value)
     return
   const account = accounts.value.find(item => item.uid === job.uid)
-  if (!account || !account.selected)
+  if (!account || (!account.selected && !qrCodeResults.value.some(row => row.uid === job.uid)))
     return
   let row = qrCodeResults.value.find(item => item.uid === job.uid)
   if (row?.jobId && row.jobId !== job.id && row.status === 'pending')
@@ -93,6 +97,7 @@ function applyQrJob(job: QrJobView) {
   row.activityId = job.activityId
   row.time = qrJobFeedbackTime(job)
   row.status = job.state === 'success' && !differentActivity ? 'success' : final ? 'error' : 'pending'
+  row.errorCode = job.errorCode
   row.message = differentActivity
     ? `先提交的活动 ${job.activityId}：${job.message}。你提交的活动 ${row.requestedActivityId} 尚未执行，请手动重新提交。`
     : qrJobFeedbackMessage(job, isOtherQrSignClient(job.clientId))
@@ -184,7 +189,9 @@ function toggleAllChecked() {
 }
 
 function handleRetryFailed() {
-  const failedRows = qrCodeResults.value.filter(item => item.status === 'error')
+  const failedRows = qrCodeResults.value.filter(item => item.status === 'error'
+    && item.errorCode !== 'CX_SESSION_EXPIRED'
+    && !accounts.value.find(account => account.uid === item.uid)?.loginExpired)
   const failedUids = new Set(failedRows.map(item => item.uid))
   if (failedUids.size === 0)
     return
@@ -198,7 +205,7 @@ function handleRetryFailed() {
     retryUrl: undefined,
   }))
   accountStore.accounts.forEach((account) => {
-    account.selected = failedUids.has(account.uid)
+    account.selected = !account.loginExpired && failedUids.has(account.uid)
   })
 }
 
@@ -351,7 +358,7 @@ async function handleCodeOrGestureSignSuccess(result: string) {
         <ul v-if="qrCodeResults.length" aria-label="各账号扫码结果" class="mb-3">
           <li v-for="item in qrCodeResults" :key="item.uid">
             <n-text :type="item.status === 'pending' ? 'info' : item.status">{{ item.time }} {{ item.name }} ({{ item.uid }}): {{ item.message }}</n-text>
-            <n-button v-if="item.retryUrl && item.status === 'error' && item.activityId && item.requestedActivityId !== item.activityId" size="small" :disabled="qrCodeLoading || accountStore.courseSyncLoading" @click="retryQrSubmission(item)">重新提交该 URL</n-button>
+    <n-button v-if="item.retryUrl && item.status === 'error' && item.errorCode !== 'CX_SESSION_EXPIRED' && !accounts.find(account => account.uid === item.uid)?.loginExpired && item.activityId && item.requestedActivityId !== item.activityId" size="small" :disabled="qrCodeLoading || accountStore.courseSyncLoading" @click="retryQrSubmission(item)">重新提交该 URL</n-button>
           </li>
         </ul>
       </template>

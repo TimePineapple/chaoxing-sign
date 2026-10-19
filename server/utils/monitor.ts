@@ -107,6 +107,8 @@ export async function initIMConnection() {
   })
 
   for await (const account of toMonitorAccounts) {
+    if ((account.info as unknown as CX.User)?.logged === false)
+      continue
     const cx = new Cx({ username: account.username, password: account.password })
 
     await cx.login()
